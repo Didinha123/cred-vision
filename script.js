@@ -360,19 +360,42 @@ var clients = [];
 var STATE_KEY = "cobranca_data";
 var _updatedAt = null;
 
+/* ── persist: salva sempre no localStorage + tenta Grid ── */
 function persist() {
+  var data = {
+    loans:   JSON.stringify(loans),
+    clients: JSON.stringify(clients),
+    users:   JSON.stringify(users)
+  };
+
+  /* localStorage é o armazenamento principal — sempre funciona */
   try {
-    window.GRID.state.set({
-      loans:   JSON.stringify(loans),
-      clients: JSON.stringify(clients),
-      users:   JSON.stringify(users)
-    }, _updatedAt)
+    localStorage.setItem("cv_loans",   data.loans);
+    localStorage.setItem("cv_clients", data.clients);
+    localStorage.setItem("cv_users",   data.users);
+  } catch(e) {}
+
+  /* Grid como backup extra (quando disponível) */
+  try {
+    window.GRID.state.set(data, _updatedAt)
       .then(function(r){ if(r && r.updated_at) _updatedAt = r.updated_at; })
       .catch(function(){});
   } catch(e) {}
 }
 
+/* ── loadState: carrega localStorage primeiro, depois Grid ── */
 function loadState() {
+  /* 1) Carrega do localStorage imediatamente (sempre disponível) */
+  try {
+    var lsLoans   = localStorage.getItem("cv_loans");
+    var lsClients = localStorage.getItem("cv_clients");
+    var lsUsers   = localStorage.getItem("cv_users");
+    if (lsLoans)   { try { loans   = JSON.parse(lsLoans);   } catch(e){} }
+    if (lsClients) { try { clients = JSON.parse(lsClients); } catch(e){} }
+    if (lsUsers)   { try { users   = JSON.parse(lsUsers);   } catch(e){} }
+  } catch(e) {}
+
+  /* 2) Tenta Grid para sincronizar dados mais recentes */
   try {
     window.GRID.state.get().then(function(r) {
       if (r && r.updated_at) _updatedAt = r.updated_at;
@@ -380,17 +403,18 @@ function loadState() {
       if (s && s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
       if (s && s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
       if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
-      if (sigModeLoanId) {
-        fillSigModeInfo();
-      } else {
-        renderAll();
-      }
+      /* Sincroniza Grid → localStorage */
+      try {
+        localStorage.setItem("cv_loans",   JSON.stringify(loans));
+        localStorage.setItem("cv_clients", JSON.stringify(clients));
+        localStorage.setItem("cv_users",   JSON.stringify(users));
+      } catch(e2) {}
+      if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
     }).catch(function(){
-      /* Grid indisponível — usa dados embutidos se existirem */
       if (sigModeLoanId) fillSigModeInfo(); else renderAll();
     });
   } catch(e) {
-    /* Grid SDK não disponível (cliente externo no GitHub Pages) */
+    /* Grid não disponível (GitHub Pages) — dados do localStorage já estão carregados */
     if (sigModeLoanId) fillSigModeInfo(); else renderAll();
   }
 }
