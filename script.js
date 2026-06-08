@@ -90,6 +90,8 @@ function doLogin() {
   var isAdmin = endsAdmin && !isExactAdmin;
   userRole    = isAdmin ? "admin" : found.role;
   currentUser = found.login;
+  /* Salva sessão no localStorage para persistir entre recargas */
+  localStorage.setItem("cv_session", JSON.stringify({ user: currentUser, role: userRole }));
   document.getElementById("login-screen").style.display = "none";
   document.getElementById("sidebar-username").textContent = currentUser;
   document.getElementById("sidebar-userrole").textContent = userRole === "admin" ? "Administrador" : "Usuário";
@@ -140,6 +142,8 @@ function doRegister() {
 function doLogout() {
   userRole    = null;
   currentUser = null;
+  /* Remove sessão salva */
+  localStorage.removeItem("cv_session");
   document.querySelectorAll(".nav-item").forEach(function(el){ el.style.display = ""; });
   document.getElementById("l-user").value = "";
   document.getElementById("l-pass").value = "";
@@ -1279,7 +1283,40 @@ window.addEventListener("load", function() {
 
   var isSigMode = checkSignatureMode();
   loadState();
+
   if (!isSigMode) {
-    document.getElementById("login-screen").style.display = "flex";
+    /* Tenta restaurar sessão do localStorage */
+    var savedSession = null;
+    try { savedSession = JSON.parse(localStorage.getItem("cv_session")); } catch(e) {}
+
+    if (savedSession && savedSession.user && savedSession.role) {
+      /* Restaura sessão sem precisar logar novamente */
+      userRole    = savedSession.role;
+      currentUser = savedSession.user;
+
+      document.getElementById("login-screen").style.display    = "none";
+      document.getElementById("sidebar-username").textContent   = currentUser;
+      document.getElementById("sidebar-userrole").textContent   = userRole === "admin" ? "Administrador" : "Usuário";
+
+      var cadPanel = document.getElementById("cad-panel");
+      var cadGrid  = document.querySelector("#tab-cadastro > div");
+
+      if (userRole === "admin") {
+        document.querySelectorAll(".nav-item").forEach(function(el){ el.style.display = ""; });
+        if (cadPanel) cadPanel.style.display = "";
+        if (cadGrid)  cadGrid.style.gridTemplateColumns = "";
+        showTab("dashboard");
+      } else {
+        document.querySelectorAll(".nav-item").forEach(function(el, i) {
+          el.style.display = (i === 2) ? "" : "none";
+        });
+        if (cadPanel) cadPanel.style.display = "none";
+        if (cadGrid)  cadGrid.style.gridTemplateColumns = "1fr";
+        showTab("cadastro");
+      }
+    } else {
+      /* Nenhuma sessão salva — exibe tela de login */
+      document.getElementById("login-screen").style.display = "flex";
+    }
   }
 });
