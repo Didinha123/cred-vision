@@ -325,23 +325,41 @@ function clearSigMode() {
   if (st) { st.textContent = "Aguardando assinatura..."; st.style.color = ""; }
 }
 
-/* ── FIX 4: submitSigMode funciona sem Grid SDK ── */
+/* ── FIX 4: submitSigMode — salva assinatura e notifica credor ── */
 function submitSigMode() {
   if (!sigModeHasMark) { alert("Por favor, assine antes de confirmar."); return; }
   var canvas = document.getElementById("sig-mode-canvas");
-  var sig = canvas.toDataURL("image/png");
+  var sig    = canvas.toDataURL("image/png");
 
+  /* 1) Tenta atualizar na lista local (mesmo navegador/aba) */
   var loan = loans.find(function(l){ return l.id === sigModeLoanId; });
   if (loan) {
-    loan.signature = sig;
+    loan.signature    = sig;
+    loan.signedAt     = today();
+    loan.signedByLink = true;
     try { persist(); } catch(e) {}
   } else if (_sigModeEmbeddedLoan) {
-    _sigModeEmbeddedLoan.signature = sig;
+    _sigModeEmbeddedLoan.signature    = sig;
+    _sigModeEmbeddedLoan.signedAt     = today();
+    _sigModeEmbeddedLoan.signedByLink = true;
     loans.push(_sigModeEmbeddedLoan);
     try { persist(); } catch(e) {}
   }
 
-  /* Mostra tela de sucesso independente do Grid estar disponível */
+  /* 2) Salva registro da assinatura num localStorage especial
+        para que o credor possa detectar mesmo em outra aba */
+  try {
+    var pending = JSON.parse(localStorage.getItem("cv_sig_pending") || "[]");
+    pending.push({
+      loanId:   sigModeLoanId,
+      debtor:   (_sigModeEmbeddedLoan || loan || {}).debtor || "—",
+      signedAt: today(),
+      sig:      sig
+    });
+    localStorage.setItem("cv_sig_pending", JSON.stringify(pending));
+  } catch(e) {}
+
+  /* 3) Esconde elementos do canvas */
   document.getElementById("sig-mode-canvas").style.display = "none";
   var btnPrimary = document.querySelector("#sig-mode .btn-primary");
   var btnGhost   = document.querySelector("#sig-mode .btn-ghost");
@@ -349,7 +367,79 @@ function submitSigMode() {
   if (btnPrimary) btnPrimary.style.display = "none";
   if (btnGhost)   btnGhost.style.display   = "none";
   if (stEl)       stEl.style.display       = "none";
-  document.getElementById("sig-mode-done").style.display = "block";
+
+  /* 4) Tela de sucesso com botão de WhatsApp para o credor */
+  var debtorName  = (_sigModeEmbeddedLoan || loan || {}).debtor || "Cliente";
+  var credorPhone = localStorage.getItem("cv_creditor_phone") || "";
+  var doneEl      = document.getElementById("sig-mode-done");
+
+  doneEl.innerHTML =
+    "<div style='font-size:48px;margin-bottom:12px;'>✅</div>" +
+    "<div style='font-size:16px;font-weight:700;color:var(--gold);margin-bottom:8px;'>Assinatura registrada!</div>" +
+    "<div style='font-size:13px;color:var(--text-muted);margin-bottom:20px;line-height:1.6;'>" +
+      "Obrigado, <strong style='color:var(--text);'>" + debtorName + "</strong>!<br>" +
+      "Por favor, envie a confirmação para o credor abaixo." +
+    "</div>" +
+    (credorPhone
+      ? "<button onclick='notifyCreditorSigned(\"" + debtorName + "\",\"" + credorPhone + "\")' " +
+          "style='padding:12px 24px;background:linear-gradient(135deg,#25D366,#128C7E);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;width:100%;margin-bottom:10px;'>📱 Enviar confirmação ao credor</button>"
+      : "<div style='font-size:12px;color:#E05A3A;padding:10px;background:rgba(224,90,58,.1);border-radius:8px;'>⚠️ Número do credor não configurado.<br>Informe pessoalmente que a assinatura foi concluída.</div>") +
+    "<div style='font-size:11px;color:var(--text-muted);margin-top:12px;'>Você pode fechar esta página.</div>";
+
+  doneEl.style.display = "block";
+}
+
+/* Confirma assinatura que chegou via outra aba/dispositivo */
+function confirmPendingSignature(loanId) {
+  var pending = [];
+  try { pending = JSON.parse(localStorage.getItem("cv_sig_pending") || "[]"); } catch(e) {}
+  var pend = pending.find(function(p){ return p.loanId === loanId; });
+  var loan = loans.find(function(l){ return l.id === loanId; });
+  if (loan && pend) {
+    loan.signature = pend.sig || ("confirmed_" + today());
+    loan.signedAt  = pend.signedAt || today();
+    persist();
+    /* Remove da fila */
+    pending = pending.filter(function(p){ return p.loanId !== loanId; });
+    localStorage.setItem("cv_sig_pending", JSON.stringify(pending));
+    closeModal();
+    renderAll();
+    toast("✅ Assinatura de " + loan.debtor + " confirmada!");
+  } else {
+    markLoanSigned(loanId);
+  }
+}
+
+/* Envia WhatsApp de confirmação para o credor */
+function notifyCreditorSigned(debtorName, credorPhone) {
+  var msg = "✅ *Assinatura confirmada!*\n\n" +
+            "*" + debtorName + "* assinou o contrato digitalmente em " +
+            new Date().toLocaleDateString("pt-BR") + " às " +
+            new Date().toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" }) + ".\n\n" +
+            "_Acesse o CredVision para visualizar a assinatura._";
+  var waUrl = "https://wa.me/55" + credorPhone.replace(/\D/g,"") + "?text=" + encodeURIComponent(msg);
+  var a = document.createElement("a");
+  a.href = waUrl; a.target = "_blank"; a.rel = "noopener noreferrer";
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); }, 200);
+}
+
+/* Credor confirma manualmente que recebeu a assinatura */
+function markLoanSigned(loanId) {
+  var loan = loans.find(function(l){ return l.id === loanId; });
+  if (!loan) return;
+  loan.signature = "confirmed_" + today();
+  loan.signedAt  = today();
+  persist();
+  /* Remove da fila de pendentes */
+  try {
+    var pending = JSON.parse(localStorage.getItem("cv_sig_pending") || "[]");
+    pending = pending.filter(function(p){ return p.loanId !== loanId; });
+    localStorage.setItem("cv_sig_pending", JSON.stringify(pending));
+  } catch(e) {}
+  closeModal();
+  renderAll();
+  toast("✅ Assinatura confirmada para " + loan.debtor + "!");
 }
 
 /* ════════════════════════════════════════
@@ -588,23 +678,43 @@ function sendSignatureWhatsApp(loanId) {
 }
 
 function showSignaturePrompt(loan) {
+  var savedPhone = localStorage.getItem("cv_creditor_phone") || "";
   var overlay = document.createElement("div");
   overlay.id = "sig-prompt-overlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:99990;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;";
   overlay.innerHTML =
-    "<div style='background:var(--bg2);border:1px solid var(--border-gold);border-radius:20px;padding:36px 32px;max-width:420px;width:90%;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.8);'>" +
+    "<div style='background:var(--bg2);border:1px solid var(--border-gold);border-radius:20px;padding:36px 32px;max-width:440px;width:90%;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.8);'>" +
     "<div style='font-size:48px;margin-bottom:12px;'>✅</div>" +
     "<div style='font-size:16px;font-weight:800;color:var(--gold);margin-bottom:6px;'>Empréstimo salvo!</div>" +
-    "<div style='font-size:13px;color:var(--text-muted);margin-bottom:24px;line-height:1.6;'>Deseja enviar o link de assinatura para <strong style='color:var(--text);'>" + loan.debtor + "</strong> pelo WhatsApp?</div>" +
+    "<div style='font-size:13px;color:var(--text-muted);margin-bottom:20px;line-height:1.6;'>Deseja enviar o link de assinatura para <strong style='color:var(--text);'>" + loan.debtor + "</strong> pelo WhatsApp?</div>" +
+    /* Campo para salvar o número do credor (para receber confirmações) */
+    "<div style='margin-bottom:20px;text-align:left;background:var(--bg3);border-radius:10px;padding:14px;border:1px solid var(--border-gold);'>" +
+    "<div style='font-size:11px;font-weight:700;color:var(--gold);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px;'>📱 Seu número (recebe confirmações)</div>" +
+    "<input id='creditor-phone-input' type='tel' placeholder='11999999999 (sem +55)' value='" + savedPhone + "' " +
+      "style='width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--bg4);color:var(--text);'>" +
+    "<div style='font-size:10px;color:var(--text-muted);margin-top:6px;'>Quando o cliente assinar, ele enviará uma confirmação para este número.</div>" +
+    "</div>" +
     "<div style='display:flex;gap:12px;justify-content:center;'>" +
-    "<button onclick='sendSignatureWhatsApp(\"" + loan.id + "\");document.getElementById(\"sig-prompt-overlay\").remove();' " +
+    "<button onclick='saveCreditorPhoneAndSend(\"" + loan.id + "\")' " +
       "style='padding:12px 24px;background:linear-gradient(135deg,#25D366,#128C7E);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;'>📲 Enviar para assinar</button>" +
-    "<button onclick='document.getElementById(\"sig-prompt-overlay\").remove();' " +
+    "<button onclick='saveCreditorPhone();document.getElementById(\"sig-prompt-overlay\").remove();' " +
       "style='padding:12px 20px;background:var(--bg3);color:var(--text-muted);border:1px solid var(--border);border-radius:12px;font-size:14px;cursor:pointer;'>Agora não</button>" +
     "</div>" +
     "</div>";
   document.body.appendChild(overlay);
   overlay.addEventListener("click", function(e){ if(e.target===overlay) overlay.remove(); });
+}
+
+function saveCreditorPhone() {
+  var el = document.getElementById("creditor-phone-input");
+  if (el && el.value.trim()) localStorage.setItem("cv_creditor_phone", el.value.trim());
+}
+
+function saveCreditorPhoneAndSend(loanId) {
+  saveCreditorPhone();
+  sendSignatureWhatsApp(loanId);
+  var overlay = document.getElementById("sig-prompt-overlay");
+  if (overlay) overlay.remove();
 }
 
 /* ════════════════════════════════════════
@@ -789,12 +899,39 @@ function openDetail(loanId) {
     "</div>" +
     "<p style='font-size:12px;color:#888;margin-bottom:16px;'>Juros: " + loan.interestRate + "% a.m. | Início: " + fmtDate(loan.startDate) + (loan.notes ? " | " + loan.notes : "") + "</p>" +
     (loan.signature
-      ? "<div style='margin-bottom:20px;'><div style='font-size:11px;font-weight:700;color:var(--gold);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;'>✍️ Assinatura</div>" +
-        "<div style='background:#fff;border-radius:8px;padding:8px;border:1px solid var(--border-gold);display:inline-block;'>" +
-        "<img src='" + loan.signature + "' style='max-width:340px;height:auto;display:block;border-radius:4px;'></div></div>"
-      : "<div style='font-size:11px;color:var(--text-muted);margin-bottom:16px;padding:10px 14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;'>" +
-        "<span>⚠️ Sem assinatura registrada</span>" +
-        "<button onclick='sendSignatureWhatsApp(\""+loan.id+"\")' style='padding:6px 14px;background:linear-gradient(135deg,#25D366,#128C7E);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;'>📲 Enviar para assinar</button>" +
+      ? (loan.signature.startsWith("confirmed_")
+          /* Confirmada manualmente */
+          ? "<div style='margin-bottom:20px;padding:12px 14px;background:rgba(76,175,125,.1);border:1px solid rgba(76,175,125,.4);border-radius:8px;display:flex;align-items:center;gap:10px;'>" +
+            "<span style='font-size:20px;'>✅</span>" +
+            "<div><div style='font-weight:700;color:#4CAF7D;font-size:13px;'>Assinatura confirmada</div>" +
+            "<div style='font-size:11px;color:var(--text-muted);'>Confirmada em " + fmtDate(loan.signedAt || "") + "</div></div>" +
+            "</div>"
+          /* Assinatura digital real (imagem) */
+          : "<div style='margin-bottom:20px;'><div style='font-size:11px;font-weight:700;color:var(--gold);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;'>✍️ Assinatura digital</div>" +
+            "<div style='background:#fff;border-radius:8px;padding:8px;border:1px solid var(--border-gold);display:inline-block;'>" +
+            "<img src='" + loan.signature + "' style='max-width:340px;height:auto;display:block;border-radius:4px;'></div>" +
+            (loan.signedAt ? "<div style='font-size:10px;color:var(--text-muted);margin-top:4px;'>Assinado em " + fmtDate(loan.signedAt) + "</div>" : "") +
+            "</div>")
+      : "<div style='margin-bottom:16px;'>" +
+        /* verifica se há pendente na fila */
+        (function(){
+          var pending = [];
+          try { pending = JSON.parse(localStorage.getItem("cv_sig_pending") || "[]"); } catch(er) {}
+          var pend = pending.find(function(p){ return p.loanId === loan.id; });
+          if (pend) {
+            return "<div style='padding:12px 14px;background:rgba(76,175,125,.1);border:1px solid rgba(76,175,125,.4);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;'>" +
+              "<div><div style='font-weight:700;color:#4CAF7D;font-size:13px;'>✅ Assinatura recebida!</div>" +
+              "<div style='font-size:11px;color:var(--text-muted);'>Cliente assinou em " + fmtDate(pend.signedAt) + "</div></div>" +
+              "<button onclick='confirmPendingSignature(\""+loan.id+"\")' style='padding:8px 16px;background:linear-gradient(135deg,#4CAF7D,#2E7D55);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;'>✅ Confirmar</button>" +
+              "</div>";
+          }
+          return "<div style='font-size:11px;color:var(--text-muted);padding:10px 14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;'>" +
+            "<span>⚠️ Sem assinatura registrada</span>" +
+            "<div style='display:flex;gap:8px;'>" +
+            "<button onclick='sendSignatureWhatsApp(\""+loan.id+"\")' style='padding:6px 14px;background:linear-gradient(135deg,#25D366,#128C7E);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;'>📲 Enviar para assinar</button>" +
+            "<button onclick='markLoanSigned(\""+loan.id+"\")' style='padding:6px 14px;background:var(--bg4);color:var(--text-muted);border:1px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;'>✏️ Marcar manualmente</button>" +
+            "</div></div>";
+        })() +
         "</div>") +
     "<table style='width:100%;font-size:13px;border-collapse:collapse;'>" +
     "<thead><tr style='background:#f8f9fa;'><th style='padding:8px 10px;text-align:left;'>Parc.</th><th style='padding:8px 10px;text-align:left;'>Vcto</th><th style='padding:8px 10px;text-align:left;'>Valor</th><th style='padding:8px 10px;text-align:left;'>Pago em</th><th style='padding:8px 10px;text-align:left;'>Pago</th><th style='padding:8px 10px;text-align:left;'>Status</th><th style='padding:8px 10px;'>Ações</th></tr></thead>" +
@@ -833,6 +970,32 @@ function getDueToday() {
 }
 
 function autoNotify() {
+  /* ── Banner de assinaturas pendentes de confirmação ── */
+  var pending = [];
+  try { pending = JSON.parse(localStorage.getItem("cv_sig_pending") || "[]"); } catch(e) {}
+  var sigBanner = document.getElementById("sig-received-banner");
+  if (!sigBanner) {
+    /* Cria o banner se não existir */
+    sigBanner = document.createElement("div");
+    sigBanner.id = "sig-received-banner";
+    var dashContent = document.getElementById("tab-dashboard");
+    if (dashContent) dashContent.insertBefore(sigBanner, dashContent.firstChild);
+  }
+  if (pending.length) {
+    sigBanner.style.display = "flex";
+    sigBanner.style.cssText = "display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,#0d2a1e,#1a4a30);border:1px solid rgba(76,175,125,.5);border-radius:12px;padding:14px 18px;margin-bottom:16px;cursor:pointer;";
+    sigBanner.innerHTML =
+      "<div style='font-size:28px;flex-shrink:0;'>✍️</div>" +
+      "<div style='flex:1;'>" +
+        "<div style='font-weight:700;color:#4CAF7D;font-size:14px;'>🔔 " + pending.length + " assinatura" + (pending.length > 1 ? "s recebidas" : " recebida") + "!</div>" +
+        "<div style='font-size:12px;color:var(--text-muted);margin-top:2px;'>" + pending.map(function(p){ return p.debtor; }).join(", ") + "</div>" +
+      "</div>" +
+      "<button onclick='openPendingSignaturesModal()' style='padding:8px 16px;background:linear-gradient(135deg,#4CAF7D,#2E7D55);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;'>Ver e confirmar →</button>";
+  } else {
+    sigBanner.style.display = "none";
+  }
+
+  /* ── Banner de cobranças do dia ── */
   var due    = getDueToday();
   var banner = document.getElementById("cobranca-banner");
   if (!banner) return;
@@ -871,6 +1034,34 @@ function openCobrancaModal() {
     "<button class='btn btn-primary' onclick='sendAllWhatsApp()'>📱 Enviar para todos</button>" +
     "<button class='btn btn-ghost' onclick='closeModal()'>Fechar</button>" +
     "</div>";
+  document.getElementById("modal-overlay").classList.add("open");
+}
+
+/* Modal com assinaturas recebidas para confirmação */
+function openPendingSignaturesModal() {
+  var pending = [];
+  try { pending = JSON.parse(localStorage.getItem("cv_sig_pending") || "[]"); } catch(e) {}
+  if (!pending.length) return;
+  var rows = pending.map(function(p) {
+    return "<div style='display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg3);border-radius:10px;border:1px solid rgba(76,175,125,.3);margin-bottom:8px;'>" +
+      "<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2E7D55,#4CAF7D);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;flex-shrink:0;'>✍</div>" +
+      "<div style='flex:1;'>" +
+        "<div style='font-weight:700;color:var(--text);font-size:13px;'>" + p.debtor + "</div>" +
+        "<div style='font-size:11px;color:var(--text-muted);margin-top:2px;'>Assinou em " + fmtDate(p.signedAt) + "</div>" +
+      "</div>" +
+      (p.sig && p.sig.startsWith("data:")
+        ? "<div style='width:80px;height:40px;background:#fff;border-radius:6px;overflow:hidden;border:1px solid var(--border-gold);flex-shrink:0;'><img src='"+p.sig+"' style='width:100%;height:100%;object-fit:contain;'></div>"
+        : "") +
+      "<button onclick='confirmPendingSignature(\""+p.loanId+"\");openPendingSignaturesModal();' " +
+        "style='padding:8px 14px;background:linear-gradient(135deg,#4CAF7D,#2E7D55);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;'>✅ Confirmar</button>" +
+    "</div>";
+  }).join("");
+
+  document.getElementById("modal-title").textContent = "✍️ Assinaturas recebidas — " + pending.length;
+  document.getElementById("modal-body").innerHTML =
+    "<p style='font-size:12px;color:var(--text-muted);margin-bottom:14px;'>Clique em <strong style='color:#4CAF7D'>✅ Confirmar</strong> para registrar cada assinatura no sistema.</p>" +
+    rows +
+    "<div style='margin-top:16px;display:flex;justify-content:flex-end;'><button class='btn btn-ghost' onclick='closeModal()'>Fechar</button></div>";
   document.getElementById("modal-overlay").classList.add("open");
 }
 
@@ -1307,6 +1498,24 @@ window.addEventListener("load", function() {
 
   var isSigMode = checkSignatureMode();
   loadState();
+
+  /* ── Listener de storage: detecta assinatura feita em outra aba ── */
+  window.addEventListener("storage", function(e) {
+    if (e.key === "cv_sig_pending" || e.key === "cv_loans") {
+      /* Recarrega dados do localStorage e atualiza dashboard */
+      try {
+        var lsLoans = localStorage.getItem("cv_loans");
+        if (lsLoans) loans = JSON.parse(lsLoans);
+      } catch(er) {}
+      renderAll();
+      /* Notifica o credor visualmente */
+      var pending = [];
+      try { pending = JSON.parse(localStorage.getItem("cv_sig_pending") || "[]"); } catch(er) {}
+      if (pending.length) {
+        toast("✅ Nova assinatura recebida de " + (pending[pending.length-1].debtor || "cliente") + "!");
+      }
+    }
+  });
 
   if (!isSigMode) {
     /* Tenta restaurar sessão do localStorage */
