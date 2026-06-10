@@ -327,13 +327,25 @@ function persist() {
   };
   // Sempre salva no localStorage (instantâneo)
   try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
-  // Se tiver Apps Script configurado, sincroniza com Google Sheets também
+  // Sincroniza com Google Sheets (no-cors para evitar bloqueio de CORS)
   if (hasAppsScript()) {
     fetch(APPS_SCRIPT_URL, {
       method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain" },
       body: JSON.stringify(payload)
     }).catch(function(){});
   }
+}
+
+function _isEmptyState(s) {
+  // Considera vazio se todos arrays estão vazios ou ausentes
+  try {
+    var l = s && s.loans   ? JSON.parse(s.loans)   : [];
+    var c = s && s.clients ? JSON.parse(s.clients) : [];
+    var u = s && s.users   ? JSON.parse(s.users)   : [];
+    return l.length === 0 && c.length === 0 && u.length === 0;
+  } catch(e) { return true; }
 }
 
 function loadState() {
@@ -343,28 +355,30 @@ function loadState() {
     if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
     if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
   }
-  if (hasAppsScript()) {
-    // Busca do Google Sheets e sincroniza localStorage
-    fetch(APPS_SCRIPT_URL)
-      .then(function(r){ return r.json(); })
-      .then(function(r){
-        var s = r && r.state ? r.state : null;
-        if (s) { try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e){} }
-        applyState(s);
-      })
-      .catch(function(){
-        // Falhou na nuvem — usa localStorage como fallback
-        try {
-          var raw = localStorage.getItem(LS_KEY);
-          applyState(raw ? JSON.parse(raw) : null);
-        } catch(e) { applyState(null); }
-      });
-  } else {
-    // Sem Apps Script: usa só localStorage
+  function fromLocalStorage() {
     try {
       var raw = localStorage.getItem(LS_KEY);
       applyState(raw ? JSON.parse(raw) : null);
     } catch(e) { applyState(null); }
+  }
+  if (hasAppsScript()) {
+    fetch(APPS_SCRIPT_URL)
+      .then(function(r){ return r.json(); })
+      .then(function(r){
+        var s = r && r.state ? r.state : null;
+        if (s && !_isEmptyState(s)) {
+          // Sheets tem dados reais — usa e atualiza localStorage
+          try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
+          applyState(s);
+        } else {
+          // Sheets vazio — usa localStorage e sobe os dados para Sheets
+          fromLocalStorage();
+          persist();
+        }
+      })
+      .catch(function(){ fromLocalStorage(); });
+  } else {
+    fromLocalStorage();
   }
 }
 /* ════════════════════════════════════════
