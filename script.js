@@ -310,29 +310,21 @@ function submitSigMode() {
 var loans   = [];
 var clients = [];
 var STATE_KEY = "cobranca_data";
-/* ── Persistência via window.GRID.state (com fallback localStorage) ── */
-var _updatedAt = null;
-var LS_KEY = "credvision_state";
-
-function hasGrid() {
-  return typeof window !== "undefined" && window.GRID && typeof window.GRID.state === "object";
-}
+/* ── Persistência via Google Apps Script ── */
+// Cole aqui a URL gerada ao publicar o Apps Script como "Web App"
+var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
 
 function persist() {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec") return;
   var payload = {
     loans:   JSON.stringify(loans),
     clients: JSON.stringify(clients),
     users:   JSON.stringify(users)
   };
-  if (hasGrid()) {
-    try {
-      window.GRID.state.set(payload, _updatedAt)
-        .then(function(r){ if(r && r.updated_at) _updatedAt = r.updated_at; })
-        .catch(function(){});
-    } catch(e) {}
-  } else {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
-  }
+  fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }).catch(function(){});
 }
 
 function loadState() {
@@ -342,25 +334,14 @@ function loadState() {
     if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
     if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
   }
-  if (hasGrid()) {
-    try {
-      window.GRID.state.get().then(function(r) {
-        if (r && r.updated_at) _updatedAt = r.updated_at;
-        applyState(r && r.state ? r.state : r);
-      }).catch(function(){
-        applyState(null);
-      });
-    } catch(e) {
-      applyState(null);
-    }
-  } else {
-    try {
-      var raw = localStorage.getItem(LS_KEY);
-      applyState(raw ? JSON.parse(raw) : null);
-    } catch(e) {
-      applyState(null);
-    }
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec") {
+    applyState(null);
+    return;
   }
+  fetch(APPS_SCRIPT_URL)
+    .then(function(r){ return r.json(); })
+    .then(function(r){ applyState(r && r.state ? r.state : null); })
+    .catch(function(){ applyState(null); });
 }
 /* ════════════════════════════════════════
    UTILITÁRIOS
