@@ -333,6 +333,14 @@ tr:hover td{background:rgba(201,164,72,.04);}
     <div id="sig-mode-info" style="background:var(--bg3);border-radius:12px;padding:16px;margin-bottom:20px;font-size:13px;border:1px solid var(--border-gold);">
       <p style="color:var(--text-muted);">Carregando dados do empréstimo...</p>
     </div>
+    <div id="sig-mode-form" style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:16px;border:1px solid var(--border);">
+      <div style="font-size:12px;color:var(--gold);font-weight:700;margin-bottom:10px;">📋 Seus dados de cadastro</div>
+      <div style="display:grid;gap:8px;">
+        <input id="sig-cpf" type="text" inputmode="numeric" placeholder="CPF (ex: 000.000.000-00)" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;">
+        <input id="sig-phone" type="tel" inputmode="tel" placeholder="Telefone / WhatsApp *" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border-gold);background:var(--bg2);color:var(--text);font-size:13px;">
+        <input id="sig-address" type="text" placeholder="Endereço (opcional)" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;">
+      </div>
+    </div>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;text-align:center;">Assine abaixo com o dedo para confirmar que está de acordo:</p>
     <canvas id="sig-mode-canvas" style="width:100%;height:180px;background:#fff;border-radius:10px;display:block;cursor:crosshair;touch-action:none;border:2px solid var(--border-gold);"></canvas>
     <div style="display:flex;gap:10px;margin-top:12px;justify-content:center;">
@@ -867,17 +875,39 @@ function submitSigMode() {
   var loan = loans.find(function(l){ return l.id === sigModeLoanId; });
   if (loan) {
     loan.signature = sig;
-    persist();
   } else if (_sigModeEmbeddedLoan) {
-    /* cliente externo: salva na cópia local e tenta persistir */
     _sigModeEmbeddedLoan.signature = sig;
     loans.push(_sigModeEmbeddedLoan);
-    persist();
+    loan = _sigModeEmbeddedLoan;
   }
+  /* ── Auto-cadastro do cliente ao assinar ── */
+  var loanRef = loan || _sigModeEmbeddedLoan;
+  if (loanRef) {
+    var cpfVal  = (document.getElementById("sig-cpf")     || {}).value || "";
+    var telVal  = (document.getElementById("sig-phone")   || {}).value || loanRef.phone || "";
+    var endVal  = (document.getElementById("sig-address") || {}).value || "";
+    var exists  = clients.some(function(c){ return c.nome.toLowerCase() === loanRef.debtor.toLowerCase(); });
+    if (!exists) {
+      clients.push({
+        id: uid(), nome: loanRef.debtor,
+        cpf: cpfVal, rg: "", tel: telVal,
+        email: "", social: "", endereco: endVal,
+        indicou: "", fotos: {}, createdAt: new Date().toISOString().slice(0,10)
+      });
+    } else {
+      /* atualiza campos preenchidos se cliente já existia */
+      var ex = clients.find(function(c){ return c.nome.toLowerCase() === loanRef.debtor.toLowerCase(); });
+      if (cpfVal && !ex.cpf) ex.cpf = cpfVal;
+      if (telVal && !ex.tel) ex.tel = telVal;
+      if (endVal && !ex.endereco) ex.endereco = endVal;
+    }
+  }
+  persist();
   document.getElementById("sig-mode-canvas").style.display = "none";
   document.querySelector("#sig-mode .btn-primary").style.display = "none";
   document.querySelector("#sig-mode .btn-ghost").style.display = "none";
   document.getElementById("sig-mode-status").style.display = "none";
+  document.getElementById("sig-mode-form").style.display = "none";
   document.getElementById("sig-mode-done").style.display = "block";
 }
 /* ════════════════════════════════════════
@@ -1899,58 +1929,4 @@ function renderAll() {
 }
 /* ════════════════════════════════════════
    INIT
-════════════════════════════════════════ */
-var today_date = today();
-document.getElementById("f-data").value  = today_date;
-document.getElementById("f-vcto").value  = addMonths(today_date, 1);
-window.addEventListener("beforeunload", function() { persist(); });
-window.addEventListener("load", function() {
-  try {
-    var docId = document.location.pathname.split("/")[2];
-    if (docId) Grid.configure({ docId: docId });
-  } catch(e) {}
-  // Copiar logo da sidebar para todos os painéis
-  var sidebarLogo = document.querySelector(".sidebar-logo-img");
-  if (sidebarLogo) {
-    ["login-logo","register-logo","recover-logo","sig-mode-logo"].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el) el.src = sidebarLogo.src;
-    });
-  }
-  // Detecta modo assinatura ANTES de loadState, para que sigModeLoanId
-  // já esteja definido quando o callback do loadState executar
-  var isSigMode = checkSignatureMode();
-  loadState();
-  // Polling: atualiza estado quando creditor volta à aba ou a cada 30s
-  document.addEventListener("visibilitychange", function() {
-    if (!document.hidden && !sigModeLoanId) {
-      loadState();
-    }
-  });
-  setInterval(function() {
-    if (!sigModeLoanId && userRole) { loadState(); }
-  }, 30000);
-  if (!isSigMode) {
-    // Bypass login: entra direto como admin
-    userRole    = "admin";
-    currentUser = "admin";
-    document.getElementById("login-screen").style.display = "none";
-    document.getElementById("sidebar-username").textContent = "CredVision";
-    document.getElementById("sidebar-userrole").textContent = "Sistema";
-    document.querySelectorAll(".nav-item").forEach(function(el){ el.style.display = ""; });
-    var cadPanel = document.getElementById("cad-panel");
-    var cadGrid  = document.querySelector("#tab-cadastro > div");
-    if (cadPanel) cadPanel.style.display = "";
-    if (cadGrid)  cadGrid.style.gridTemplateColumns = "";
-    showTab("dashboard");
-  }
-});
-</script>
-
-<!-- Formulário oculto para sync com Google Sheets (sem CORS) -->
-<iframe name="cv-sync-frame" style="display:none"></iframe>
-<form id="cv-sync-form" method="POST" target="cv-sync-frame" style="display:none">
-  <input type="hidden" name="data" id="cv-sync-data">
-</form>
-</body>
-</html>
+══
