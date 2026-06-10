@@ -340,19 +340,14 @@ function loadState() {
 // Backup manual para Google Sheets
 function backupToSheets() {
   if (!APPS_SCRIPT_URL) return;
-  var payload = {
-    loans:   JSON.stringify(loans),
-    clients: JSON.stringify(clients),
-    users:   JSON.stringify(users)
-  };
-  fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify(payload)
-  })
-  .then(function(){ toast("✅ Backup enviado para Google Sheets!"); })
-  .catch(function(){ toast("⚠️ Erro ao enviar backup."); });
+  var form  = document.getElementById("cv-sync-form");
+  var input = document.getElementById("cv-sync-data");
+  if (!form || !input) return;
+  var payload = { loans: JSON.stringify(loans), clients: JSON.stringify(clients), users: JSON.stringify(users) };
+  form.action = APPS_SCRIPT_URL;
+  input.value = JSON.stringify(payload);
+  form.submit();
+  toast("☁️ Backup enviado para Google Sheets!");
 }
 
 // Restore manual do Google Sheets
