@@ -310,14 +310,10 @@ function submitSigMode() {
 var loans   = [];
 var clients = [];
 var STATE_KEY = "cobranca_data";
-/* ── Persistência: localStorage (imediato) + Google Apps Script (nuvem) ── */
-// Opcional: cole aqui a URL do Apps Script para sincronizar com Google Sheets
-var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
+/* ── Persistência via localStorage ── */
 var LS_KEY = "credvision_state";
-
-function hasAppsScript() {
-  return APPS_SCRIPT_URL && APPS_SCRIPT_URL !== "COLE_AQUI_A_URL_DO_APPS_SCRIPT";
-}
+// URL do Google Apps Script (para backup/restore manual)
+var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
 
 function persist() {
   var payload = {
@@ -325,27 +321,7 @@ function persist() {
     clients: JSON.stringify(clients),
     users:   JSON.stringify(users)
   };
-  // Sempre salva no localStorage (instantâneo)
   try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
-  // Sincroniza com Google Sheets (no-cors para evitar bloqueio de CORS)
-  if (hasAppsScript()) {
-    fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify(payload)
-    }).catch(function(){});
-  }
-}
-
-function _isEmptyState(s) {
-  // Considera vazio se todos arrays estão vazios ou ausentes
-  try {
-    var l = s && s.loans   ? JSON.parse(s.loans)   : [];
-    var c = s && s.clients ? JSON.parse(s.clients) : [];
-    var u = s && s.users   ? JSON.parse(s.users)   : [];
-    return l.length === 0 && c.length === 0 && u.length === 0;
-  } catch(e) { return true; }
 }
 
 function loadState() {
@@ -355,31 +331,47 @@ function loadState() {
     if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
     if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
   }
-  function fromLocalStorage() {
-    try {
-      var raw = localStorage.getItem(LS_KEY);
-      applyState(raw ? JSON.parse(raw) : null);
-    } catch(e) { applyState(null); }
-  }
-  if (hasAppsScript()) {
-    fetch(APPS_SCRIPT_URL)
-      .then(function(r){ return r.json(); })
-      .then(function(r){
-        var s = r && r.state ? r.state : null;
-        if (s && !_isEmptyState(s)) {
-          // Sheets tem dados reais — usa e atualiza localStorage
-          try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
-          applyState(s);
-        } else {
-          // Sheets vazio — usa localStorage e sobe os dados para Sheets
-          fromLocalStorage();
-          persist();
-        }
-      })
-      .catch(function(){ fromLocalStorage(); });
-  } else {
-    fromLocalStorage();
-  }
+  try {
+    var raw = localStorage.getItem(LS_KEY);
+    applyState(raw ? JSON.parse(raw) : null);
+  } catch(e) { applyState(null); }
+}
+
+// Backup manual para Google Sheets
+function backupToSheets() {
+  if (!APPS_SCRIPT_URL) return;
+  var payload = {
+    loans:   JSON.stringify(loans),
+    clients: JSON.stringify(clients),
+    users:   JSON.stringify(users)
+  };
+  fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify(payload)
+  })
+  .then(function(){ toast("✅ Backup enviado para Google Sheets!"); })
+  .catch(function(){ toast("⚠️ Erro ao enviar backup."); });
+}
+
+// Restore manual do Google Sheets
+function restoreFromSheets() {
+  if (!APPS_SCRIPT_URL) return;
+  toast("Buscando dados do Google Sheets…");
+  fetch(APPS_SCRIPT_URL)
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      var s = r && r.state ? r.state : null;
+      if (!s || (!s.loans && !s.clients)) { toast("⚠️ Planilha vazia."); return; }
+      try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
+      if (s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
+      if (s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
+      if (s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
+      renderAll();
+      toast("✅ Dados restaurados do Google Sheets!");
+    })
+    .catch(function(){ toast("⚠️ Erro ao buscar backup."); });
 }
 /* ════════════════════════════════════════
    UTILITÁRIOS
@@ -1319,6 +1311,7 @@ function renderAll() {
 var today_date = today();
 document.getElementById("f-data").value  = today_date;
 document.getElementById("f-vcto").value  = addMonths(today_date, 1);
+window.addEventListener("beforeunload", function() { persist(); });
 window.addEventListener("load", function() {
   try {
     var docId = document.location.pathname.split("/")[2];
