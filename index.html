@@ -891,6 +891,7 @@ var STATE_KEY = "cobranca_data";
 var LS_KEY = "credvision_state";
 var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
 
+var _syncTimer = null;
 function persist() {
   var payload = {
     loans:   JSON.stringify(loans),
@@ -898,6 +899,10 @@ function persist() {
     users:   JSON.stringify(users)
   };
   try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
+  if (APPS_SCRIPT_URL) {
+    if (_syncTimer) clearTimeout(_syncTimer);
+    _syncTimer = setTimeout(function() { backupToSheets(); }, 2000);
+  }
 }
 
 function loadState() {
