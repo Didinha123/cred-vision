@@ -369,6 +369,10 @@ tr:hover td{background:rgba(201,164,72,.04);}
   </nav>
   <div class="sidebar-footer" style="padding:14px 18px;">
     <div style="font-size:10px;color:var(--text-muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px;text-align:center;">CredVision v1.0</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button onclick="backupToSheets()" style="flex:1;padding:7px 4px;background:rgba(76,175,125,.15);color:#4CAF7D;border:1px solid rgba(76,175,125,.3);border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;">☁️ Backup</button>
+      <button onclick="restoreFromSheets()" style="flex:1;padding:7px 4px;background:rgba(201,164,72,.1);color:var(--gold);border:1px solid var(--border-gold);border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;">📥 Restore</button>
+    </div>
     <div id="sidebar-user-info" style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--bg3);border:1px solid var(--border-gold);border-radius:10px;padding:8px 12px;">
       <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
         <span style="font-size:18px;flex-shrink:0;">👤</span>
@@ -883,39 +887,54 @@ function submitSigMode() {
 var loans   = [];
 var clients = [];
 var STATE_KEY = "cobranca_data";
-/* ── Persistência via window.GRID.state ── */
-var _updatedAt = null;
+/* ── Persistência via localStorage ── */
+var LS_KEY = "credvision_state";
+var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
+
 function persist() {
-  try {
-    window.GRID.state.set({
-      loans:   JSON.stringify(loans),
-      clients: JSON.stringify(clients),
-      users:   JSON.stringify(users)
-    }, _updatedAt)
-      .then(function(r){ if(r && r.updated_at) _updatedAt = r.updated_at; })
-      .catch(function(){});
-  } catch(e) {}
+  var payload = {
+    loans:   JSON.stringify(loans),
+    clients: JSON.stringify(clients),
+    users:   JSON.stringify(users)
+  };
+  try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
 }
+
 function loadState() {
-  try {
-    window.GRID.state.get().then(function(r) {
-      if (r && r.updated_at) _updatedAt = r.updated_at;
-      var s = r && r.state ? r.state : r;
-      if (s && s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
-      if (s && s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
-      if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
-      /* Se estiver em modo assinatura, preenche os dados agora que carregaram */
-      if (sigModeLoanId) {
-        fillSigModeInfo();
-      } else {
-        renderAll();
-      }
-    }).catch(function(){
-      if (sigModeLoanId) fillSigModeInfo(); else renderAll();
-    });
-  } catch(e) {
-    if (sigModeLoanId) fillSigModeInfo(); else renderAll();
+  function applyState(s) {
+    if (s && s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
+    if (s && s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
+    if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
+    if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
   }
+  try {
+    var raw = localStorage.getItem(LS_KEY);
+    applyState(raw ? JSON.parse(raw) : null);
+  } catch(e) { applyState(null); }
+}
+
+function backupToSheets() {
+  var payload = { loans: JSON.stringify(loans), clients: JSON.stringify(clients), users: JSON.stringify(users) };
+  fetch(APPS_SCRIPT_URL, { method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain"}, body:JSON.stringify(payload) })
+    .then(function(){ toast("✅ Backup enviado para Google Sheets!"); })
+    .catch(function(){ toast("⚠️ Erro ao enviar backup."); });
+}
+
+function restoreFromSheets() {
+  toast("Buscando dados do Google Sheets…");
+  fetch(APPS_SCRIPT_URL)
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      var s = r && r.state ? r.state : null;
+      if (!s || (!s.loans && !s.clients)) { toast("⚠️ Planilha vazia."); return; }
+      try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
+      if (s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
+      if (s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
+      if (s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
+      renderAll();
+      toast("✅ Dados restaurados do Google Sheets!");
+    })
+    .catch(function(){ toast("⚠️ Erro ao buscar backup."); });
 }
 /* ════════════════════════════════════════
    UTILITÁRIOS
@@ -1855,6 +1874,7 @@ function renderAll() {
 var today_date = today();
 document.getElementById("f-data").value  = today_date;
 document.getElementById("f-vcto").value  = addMonths(today_date, 1);
+window.addEventListener("beforeunload", function() { persist(); });
 window.addEventListener("load", function() {
   try {
     var docId = document.location.pathname.split("/")[2];
