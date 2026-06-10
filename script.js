@@ -290,17 +290,39 @@ function submitSigMode() {
   var loan = loans.find(function(l){ return l.id === sigModeLoanId; });
   if (loan) {
     loan.signature = sig;
-    persist();
   } else if (_sigModeEmbeddedLoan) {
-    /* cliente externo: salva na cópia local e tenta persistir */
     _sigModeEmbeddedLoan.signature = sig;
     loans.push(_sigModeEmbeddedLoan);
-    persist();
+    loan = _sigModeEmbeddedLoan;
   }
+  /* ── Auto-cadastro do cliente ao assinar ── */
+  var loanRef = loan || _sigModeEmbeddedLoan;
+  if (loanRef) {
+    var cpfVal = (document.getElementById("sig-cpf")     || {}).value || "";
+    var telVal = (document.getElementById("sig-phone")   || {}).value || loanRef.phone || "";
+    var endVal = (document.getElementById("sig-address") || {}).value || "";
+    var exists = clients.some(function(c){ return c.nome.toLowerCase() === loanRef.debtor.toLowerCase(); });
+    if (!exists) {
+      clients.push({
+        id: uid(), nome: loanRef.debtor,
+        cpf: cpfVal, rg: "", tel: telVal,
+        email: "", social: "", endereco: endVal,
+        indicou: "", fotos: {}, createdAt: new Date().toISOString().slice(0,10)
+      });
+    } else {
+      var ex = clients.find(function(c){ return c.nome.toLowerCase() === loanRef.debtor.toLowerCase(); });
+      if (cpfVal && !ex.cpf) ex.cpf = cpfVal;
+      if (telVal && !ex.tel) ex.tel = telVal;
+      if (endVal && !ex.endereco) ex.endereco = endVal;
+    }
+  }
+  persist();
   document.getElementById("sig-mode-canvas").style.display = "none";
   document.querySelector("#sig-mode .btn-primary").style.display = "none";
   document.querySelector("#sig-mode .btn-ghost").style.display = "none";
   document.getElementById("sig-mode-status").style.display = "none";
+  var sigForm = document.getElementById("sig-mode-form");
+  if (sigForm) sigForm.style.display = "none";
   document.getElementById("sig-mode-done").style.display = "block";
 }
 /* ════════════════════════════════════════
