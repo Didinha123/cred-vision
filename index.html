@@ -1929,4 +1929,47 @@ function renderAll() {
 }
 /* ════════════════════════════════════════
    INIT
-══
+════════════════════════════════════════ */
+(function() {
+  /* Verifica se é modo assinatura via link */
+  if (!checkSignatureMode()) {
+    loadState();
+  }
+  /* Polling a cada 30s para detectar assinatura remota */
+  setInterval(function() {
+    if (!sigModeLoanId || document.hidden) return;
+    var raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    try {
+      var s = JSON.parse(raw);
+      if (s && s.loans) {
+        var arr = JSON.parse(s.loans);
+        var found = arr.find(function(l){ return l.id === sigModeLoanId; });
+        if (found && found.signature) {
+          document.getElementById("sig-mode-canvas").style.display = "none";
+          var btn = document.querySelector("#sig-mode .btn-primary");
+          if (btn) btn.style.display = "none";
+          var btnG = document.querySelector("#sig-mode .btn-ghost");
+          if (btnG) btnG.style.display = "none";
+          var st = document.getElementById("sig-mode-status");
+          if (st) st.style.display = "none";
+          var sf = document.getElementById("sig-mode-form");
+          if (sf) sf.style.display = "none";
+          document.getElementById("sig-mode-done").style.display = "block";
+        }
+      }
+    } catch(e){}
+  }, 30000);
+  document.addEventListener("visibilitychange", function() {
+    if (!document.hidden && !sigModeLoanId) renderAll();
+  });
+})();
+</script>
+
+<!-- Formulário oculto para sync com Google Sheets (sem CORS) -->
+<iframe name="cv-sync-frame" style="display:none"></iframe>
+<form id="cv-sync-form" method="POST" target="cv-sync-frame" style="display:none">
+  <input type="hidden" name="data" id="cv-sync-data">
+</form>
+</body>
+</html>
