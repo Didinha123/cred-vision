@@ -310,38 +310,56 @@ function submitSigMode() {
 var loans   = [];
 var clients = [];
 var STATE_KEY = "cobranca_data";
-/* ── Persistência via window.GRID.state ── */
+/* ── Persistência via window.GRID.state (com fallback localStorage) ── */
 var _updatedAt = null;
-function persist() {
-  try {
-    window.GRID.state.set({
-      loans:   JSON.stringify(loans),
-      clients: JSON.stringify(clients),
-      users:   JSON.stringify(users)
-    }, _updatedAt)
-      .then(function(r){ if(r && r.updated_at) _updatedAt = r.updated_at; })
-      .catch(function(){});
-  } catch(e) {}
+var LS_KEY = "credvision_state";
+
+function hasGrid() {
+  return typeof window !== "undefined" && window.GRID && typeof window.GRID.state === "object";
 }
+
+function persist() {
+  var payload = {
+    loans:   JSON.stringify(loans),
+    clients: JSON.stringify(clients),
+    users:   JSON.stringify(users)
+  };
+  if (hasGrid()) {
+    try {
+      window.GRID.state.set(payload, _updatedAt)
+        .then(function(r){ if(r && r.updated_at) _updatedAt = r.updated_at; })
+        .catch(function(){});
+    } catch(e) {}
+  } else {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
+  }
+}
+
 function loadState() {
-  try {
-    window.GRID.state.get().then(function(r) {
-      if (r && r.updated_at) _updatedAt = r.updated_at;
-      var s = r && r.state ? r.state : r;
-      if (s && s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
-      if (s && s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
-      if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
-      /* Se estiver em modo assinatura, preenche os dados agora que carregaram */
-      if (sigModeLoanId) {
-        fillSigModeInfo();
-      } else {
-        renderAll();
-      }
-    }).catch(function(){
-      if (sigModeLoanId) fillSigModeInfo(); else renderAll();
-    });
-  } catch(e) {
-    if (sigModeLoanId) fillSigModeInfo(); else renderAll();
+  function applyState(s) {
+    if (s && s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
+    if (s && s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
+    if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
+    if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
+  }
+  if (hasGrid()) {
+    try {
+      window.GRID.state.get().then(function(r) {
+        if (r && r.updated_at) _updatedAt = r.updated_at;
+        applyState(r && r.state ? r.state : r);
+      }).catch(function(){
+        applyState(null);
+      });
+    } catch(e) {
+      applyState(null);
+    }
+  } else {
+    try {
+      var raw = localStorage.getItem(LS_KEY);
+      applyState(raw ? JSON.parse(raw) : null);
+    } catch(e) {
+      applyState(null);
+    }
   }
 }
 /* ════════════════════════════════════════
