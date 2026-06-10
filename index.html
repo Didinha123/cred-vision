@@ -818,7 +818,6 @@ function fillSigModeInfo() {
     "<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;'>" +
     "<div><span style='color:var(--text-muted);'>Valor:</span> <strong>" + brl(loan.totalAmount) + "</strong></div>" +
     "<div><span style='color:var(--text-muted);'>Parcelas:</span> <strong>" + (loan.installments||[]).length + "x " + brl((loan.installments||[{amount:0}])[0].amount) + "</strong></div>" +
-    "<div><span style='color:var(--text-muted);'>Juros:</span> <strong>" + loan.interestRate + "% a.m.</strong></div>" +
     "<div><span style='color:var(--text-muted);'>1º Vcto:</span> <strong>" + fmtDate((loan.installments||[{dueDate:""}])[0].dueDate) + "</strong></div>" +
     "</div>";
 }
@@ -1845,17 +1844,38 @@ function renderCadastro() {
     list.innerHTML = "<div class='empty'><div class='icon'>🪪</div><p>Nenhum cliente cadastrado.</p></div>";
     return;
   }
-  list.innerHTML = clients.map(function(c){
+  var rows = clients.map(function(c) {
     var loanCount = loans.filter(function(l){ return l.debtor === c.nome; }).length;
-    return "<div class='cad-item' onclick='viewClient(\""+c.id+"\")'>" +
-      "<div class='cad-avatar'>"+c.nome[0].toUpperCase()+"</div>" +
-      "<div class='cad-info'>" +
-        "<div class='cad-name'>"+c.nome+"</div>" +
-        "<div class='cad-sub'>CPF: "+c.cpf+" &nbsp;|&nbsp; "+c.tel+(loanCount?" &nbsp;|&nbsp; "+loanCount+" empréstimo"+(loanCount!==1?"s":""):"")+"</div>" +
-      "</div>" +
-      "<span style='font-size:11px;color:var(--text-muted);'>"+fmtDate(c.createdAt)+"</span>" +
-    "</div>";
+    var fotos = FOTO_SLOTS.filter(function(s){ return c.fotos && c.fotos[s.id]; });
+    var fotoHtml = fotos.length
+      ? fotos.map(function(s){
+          return "<img src='" + c.fotos[s.id] + "' title='" + s.label + "' style='width:30px;height:30px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;' onclick='event.stopPropagation();viewClient(\""+c.id+"\")' />";
+        }).join("")
+      : "<span style='color:var(--text-muted);font-size:11px;'>—</span>";
+    return "<tr onclick='viewClient(\""+c.id+"\")' style='cursor:pointer;border-bottom:1px solid var(--border);transition:background .15s;' onmouseover=\"this.style.background='var(--bg3)'\" onmouseout=\"this.style.background=''\">" +
+      "<td style='padding:8px 6px;font-weight:600;color:var(--text);'>" + c.nome + "</td>" +
+      "<td style='padding:8px 6px;color:var(--text-muted);font-size:12px;'>" + (c.tel || "—") + "</td>" +
+      "<td style='padding:8px 6px;'><div style='display:flex;gap:4px;flex-wrap:wrap;align-items:center;'>" + fotoHtml + "</div></td>" +
+      "<td style='padding:8px 6px;font-size:12px;color:var(--text-muted);text-align:center;'>" + (loanCount ? loanCount : "—") + "</td>" +
+      "<td style='padding:8px 6px;font-size:11px;color:var(--text-muted);'>" + fmtDate(c.createdAt) + "</td>" +
+      "<td style='padding:8px 6px;white-space:nowrap;'>" +
+        "<button class='btn btn-sm' style='background:var(--bg3);border:1px solid var(--border-gold);color:var(--gold);padding:2px 8px;font-size:11px;' onclick='event.stopPropagation();viewClient(\""+c.id+"\")'>🪪 Ver</button> " +
+        "<button class='btn btn-sm' style='background:var(--bg3);border:1px solid var(--border);color:var(--text-muted);padding:2px 8px;font-size:11px;' onclick='event.stopPropagation();editClient(\""+c.id+"\")'>✏️</button>" +
+      "</td>" +
+    "</tr>";
   }).join("");
+  list.innerHTML =
+    "<table style='width:100%;border-collapse:collapse;font-size:13px;'>" +
+      "<thead><tr style='border-bottom:2px solid var(--border-gold);'>" +
+        "<th style='text-align:left;padding:8px 6px;color:var(--gold);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;'>Nome</th>" +
+        "<th style='text-align:left;padding:8px 6px;color:var(--gold);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;'>Telefone</th>" +
+        "<th style='text-align:left;padding:8px 6px;color:var(--gold);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;'>Fotos</th>" +
+        "<th style='text-align:center;padding:8px 6px;color:var(--gold);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;'>Emp.</th>" +
+        "<th style='text-align:left;padding:8px 6px;color:var(--gold);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;'>Cadastro</th>" +
+        "<th style='padding:8px 6px;'></th>" +
+      "</tr></thead>" +
+      "<tbody>" + rows + "</tbody>" +
+    "</table>";
 }
 /* ════════════════════════════════════════
    TABS
