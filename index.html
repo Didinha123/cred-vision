@@ -914,10 +914,14 @@ function loadState() {
 }
 
 function backupToSheets() {
+  var form  = document.getElementById("cv-sync-form");
+  var input = document.getElementById("cv-sync-data");
+  if (!form || !input) return;
   var payload = { loans: JSON.stringify(loans), clients: JSON.stringify(clients), users: JSON.stringify(users) };
-  fetch(APPS_SCRIPT_URL, { method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain"}, body:JSON.stringify(payload) })
-    .then(function(){ toast("✅ Backup enviado para Google Sheets!"); })
-    .catch(function(){ toast("⚠️ Erro ao enviar backup."); });
+  form.action = APPS_SCRIPT_URL;
+  input.value = JSON.stringify(payload);
+  form.submit();
+  toast("☁️ Backup enviado para Google Sheets!");
 }
 
 function restoreFromSheets() {
@@ -1917,5 +1921,11 @@ window.addEventListener("load", function() {
   }
 });
 </script>
+
+<!-- Formulário oculto para sync com Google Sheets (sem CORS) -->
+<iframe name="cv-sync-frame" style="display:none"></iframe>
+<form id="cv-sync-form" method="POST" target="cv-sync-frame" style="display:none">
+  <input type="hidden" name="data" id="cv-sync-data">
+</form>
 </body>
 </html>
