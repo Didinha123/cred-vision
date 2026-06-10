@@ -313,7 +313,7 @@ var STATE_KEY = "cobranca_data";
 /* ── Persistência via localStorage ── */
 var LS_KEY = "credvision_state";
 // URL do Google Apps Script (para backup/restore manual)
-var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyand37Xd33vYjWbO4qZgM_UFNf0HKD7YvNSJ-MmR6vHxpCaGd7flVNb6K8BEcBDAVF/exec";
+var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
 
 var _syncTimer = null;
 function persist() {
@@ -903,16 +903,16 @@ function renderDashboard() {
     var score = calcScore(loan.debtor);
     var stLabel = st === "ok" ? "Quitado" : st === "overdue" ? "Em atraso" : "Em dia";
     return "<tr>" +
-      "<td><strong style='cursor:pointer;color:#1B3A6B;' onclick='openDetail(\""+loan.id+"\")'>" + loan.debtor + "</strong>" +
+      "<td><strong style='cursor:pointer;color:#ffffff;' onclick='openDetail(\""+loan.id+"\")'>" + loan.debtor + "</strong>" +
         (loan.phone ? "<br><span style='font-size:11px;color:#aaa;'>"+loan.phone+"</span>" : "") + "</td>" +
       "<td>" + brl(loan.totalAmount) + "</td>" +
       "<td style='color:#3B7A57;'>" + brl(paid) + "</td>" +
       "<td style='color:#B85C38;font-weight:600;'>" + brl(Math.max(0,saldo)) + "</td>" +
-      "<td>" + (nd ? "<span style='color:"+(isOverdue(nd.dueDate)?"#B85C38":"#1a1a1a")+"'>" + fmtDate(nd.dueDate) + "</span><br><span style='font-size:11px;color:#888;'>" + brl(nd.amount) + "</span>" : "<span style='color:#3B7A57'>Quitado</span>") + "</td>" +
+      "<td>" + (nd ? "<span style='color:#ffffff;'>" + fmtDate(nd.dueDate) + "</span><br><span style='font-size:11px;color:#888;'>" + brl(nd.amount) + "</span>" : "<span style='color:#3B7A57'>Quitado</span>") + "</td>" +
       "<td><span class='badge "+st+"'>" + stLabel + "</span></td>" +
       "<td style='text-align:center;'>" +
         (loan.signature
-          ? "<span title='Contrato assinado' style='color:#3B7A57;font-size:16px;'>✅</span>"
+          ? "<span style='color:#3B7A57;font-size:11px;font-weight:600;'>✅ Assinatura Confirmada</span>"
           : "<span title='Sem assinatura' style='color:#B85C38;font-size:13px;cursor:pointer;' onclick='sendSignatureWhatsApp(\""+loan.id+"\")'>⚠️ Enviar</span>") +
       "</td>" +
       "<td><span class='score "+score+"'>" + score + "</span></td>" +
