@@ -313,8 +313,9 @@ var STATE_KEY = "cobranca_data";
 /* ── Persistência via localStorage ── */
 var LS_KEY = "credvision_state";
 // URL do Google Apps Script (para backup/restore manual)
-var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
+var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyand37Xd33vYjWbO4qZgM_UFNf0HKD7YvNSJ-MmR6vHxpCaGd7flVNb6K8BEcBDAVF/exec";
 
+var _syncTimer = null;
 function persist() {
   var payload = {
     loans:   JSON.stringify(loans),
@@ -322,6 +323,11 @@ function persist() {
     users:   JSON.stringify(users)
   };
   try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
+  // Auto-sync para Google Sheets com debounce de 2s
+  if (APPS_SCRIPT_URL) {
+    if (_syncTimer) clearTimeout(_syncTimer);
+    _syncTimer = setTimeout(function() { backupToSheets(); }, 2000);
+  }
 }
 
 function loadState() {
