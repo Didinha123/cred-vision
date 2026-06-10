@@ -310,21 +310,30 @@ function submitSigMode() {
 var loans   = [];
 var clients = [];
 var STATE_KEY = "cobranca_data";
-/* ── Persistência via Google Apps Script ── */
-// Cole aqui a URL gerada ao publicar o Apps Script como "Web App"
+/* ── Persistência: localStorage (imediato) + Google Apps Script (nuvem) ── */
+// Opcional: cole aqui a URL do Apps Script para sincronizar com Google Sheets
 var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
+var LS_KEY = "credvision_state";
+
+function hasAppsScript() {
+  return APPS_SCRIPT_URL && APPS_SCRIPT_URL !== "COLE_AQUI_A_URL_DO_APPS_SCRIPT";
+}
 
 function persist() {
-  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec") return;
   var payload = {
     loans:   JSON.stringify(loans),
     clients: JSON.stringify(clients),
     users:   JSON.stringify(users)
   };
-  fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    body: JSON.stringify(payload)
-  }).catch(function(){});
+  // Sempre salva no localStorage (instantâneo)
+  try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
+  // Se tiver Apps Script configurado, sincroniza com Google Sheets também
+  if (hasAppsScript()) {
+    fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }).catch(function(){});
+  }
 }
 
 function loadState() {
@@ -334,14 +343,29 @@ function loadState() {
     if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
     if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
   }
-  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec") {
-    applyState(null);
-    return;
+  if (hasAppsScript()) {
+    // Busca do Google Sheets e sincroniza localStorage
+    fetch(APPS_SCRIPT_URL)
+      .then(function(r){ return r.json(); })
+      .then(function(r){
+        var s = r && r.state ? r.state : null;
+        if (s) { try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e){} }
+        applyState(s);
+      })
+      .catch(function(){
+        // Falhou na nuvem — usa localStorage como fallback
+        try {
+          var raw = localStorage.getItem(LS_KEY);
+          applyState(raw ? JSON.parse(raw) : null);
+        } catch(e) { applyState(null); }
+      });
+  } else {
+    // Sem Apps Script: usa só localStorage
+    try {
+      var raw = localStorage.getItem(LS_KEY);
+      applyState(raw ? JSON.parse(raw) : null);
+    } catch(e) { applyState(null); }
   }
-  fetch(APPS_SCRIPT_URL)
-    .then(function(r){ return r.json(); })
-    .then(function(r){ applyState(r && r.state ? r.state : null); })
-    .catch(function(){ applyState(null); });
 }
 /* ════════════════════════════════════════
    UTILITÁRIOS
