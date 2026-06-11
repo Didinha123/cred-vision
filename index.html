@@ -1002,7 +1002,7 @@ var STATE_KEY = "credvision_state";
 ════════════════════════════════════════ */
 /* URL do Apps Script — embutida no código (localStorage sobrescreve se configurado manualmente) */
 var APPS_SCRIPT_URL = (function(){
-  var fixed = "https://script.google.com/macros/s/AKfycbwLGqYg-KC9WNX5SHXt9b2ikwzmRc1iP_JWiZqtcvvx8TcTlmePd0-TwVieK-TqjeQU/exec";
+  var fixed = "https://script.google.com/macros/s/AKfycbyZvozYtWO0AVWIVFA7rkNckGM2HK6GTssM9Ys7J0Sycw5EC5j2qf-jgORvc86aV6pr/exec";
   try { return localStorage.getItem("credvision_gas_url") || fixed; } catch(e){ return fixed; }
 })();
 
