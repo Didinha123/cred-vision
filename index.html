@@ -999,8 +999,11 @@ var STATE_KEY = "credvision_state";
 /* ════════════════════════════════════════
    COLE AQUI A URL DO SEU APPS SCRIPT
 ════════════════════════════════════════ */
-/* URL do Apps Script — carregada do localStorage para não precisar editar o código */
-var APPS_SCRIPT_URL = (function(){ try { return localStorage.getItem("credvision_gas_url") || ""; } catch(e){ return ""; } })();
+/* URL do Apps Script — embutida no código (localStorage sobrescreve se configurado manualmente) */
+var APPS_SCRIPT_URL = (function(){
+  var fixed = "https://script.google.com/macros/s/AKfycbwLGqYg-KC9WNX5SHXt9b2ikwzmRc1iP_JWiZqtcvvx8TcTlmePd0-TwVieK-TqjeQU/exec";
+  try { return localStorage.getItem("credvision_gas_url") || fixed; } catch(e){ return fixed; }
+})();
 
 /* ── Salva/lê URL pelo painel de configurações ── */
 function saveGasUrl() {
