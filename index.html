@@ -365,6 +365,9 @@ tr:hover td{background:rgba(201,164,72,.04);}
     <div class="nav-item" onclick="showTab('clientes')">
       <span class="nav-icon">👤</span><span>Clientes</span>
     </div>
+    <div class="nav-item" onclick="showTab('config')">
+      <span class="nav-icon">⚙️</span><span>Configurações</span>
+    </div>
   </nav>
   <div class="sidebar-footer" style="padding:14px 18px;">
     <div style="font-size:10px;color:var(--text-muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px;text-align:center;">CredVision v1.0</div>
@@ -555,6 +558,36 @@ tr:hover td{background:rgba(201,164,72,.04);}
 <div class="page" id="tab-clientes">
   <div id="clients-grid" class="clients-grid"></div>
 </div>
+<!-- ════════════════ CONFIGURAÇÕES ════════════════ -->
+<div class="page" id="tab-config">
+  <div style="max-width:600px;margin:0 auto;">
+    <h2 style="color:var(--gold);margin-bottom:24px;font-size:20px;letter-spacing:1px;">⚙️ Configurações</h2>
+
+    <!-- Google Sheets -->
+    <div style="background:var(--bg2);border:1px solid var(--border-gold);border-radius:14px;padding:24px;margin-bottom:20px;">
+      <h3 style="color:var(--gold);font-size:14px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">📊 Google Sheets — Sincronização</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
+        Cole abaixo a URL do seu Google Apps Script (Implantação → Aplicativo da web).
+        Os dados serão enviados toda vez que você salvar um empréstimo ou parcela.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input id="gas-url-input" type="url" placeholder="https://script.google.com/macros/s/.../exec"
+          style="flex:1;min-width:200px;padding:10px 14px;background:var(--bg3);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;"
+          oninput="this.style.borderColor=this.value?'var(--gold)':'var(--border)'">
+        <button onclick="saveGasUrl()" class="btn btn-green" style="white-space:nowrap;">💾 Salvar URL</button>
+        <button onclick="testGasConnection()" class="btn" style="background:var(--bg4);border:1px solid var(--border);white-space:nowrap;">🔄 Testar</button>
+      </div>
+      <div id="gas-url-status" style="margin-top:12px;font-size:12px;color:var(--text-muted);"></div>
+    </div>
+
+    <!-- Exportar dados -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;">
+      <h3 style="color:var(--gold);font-size:14px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">💾 Backup local</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Exporte todos os dados como arquivo JSON para backup.</p>
+      <button onclick="exportBackup()" class="btn" style="background:var(--bg4);border:1px solid var(--border);">📥 Exportar backup</button>
+    </div>
+  </div>
+</div>
 <!-- ════════════════ MODAL DETALHES ════════════════ -->
 <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
@@ -672,6 +705,8 @@ function doLogin() {
   var isAdmin = endsAdmin && !isExactAdmin;
   userRole    = isAdmin ? "admin" : found.role;
   currentUser = found.login;
+  /* salva sessão para auto-login no próximo refresh */
+  try { localStorage.setItem("credvision_session", JSON.stringify({ user: currentUser, role: userRole })); } catch(e) {}
   document.getElementById("login-screen").style.display = "none";
   /* atualiza rodapé da sidebar */
   document.getElementById("sidebar-username").textContent = currentUser;
@@ -727,6 +762,8 @@ function doRegister() {
 function doLogout() {
   userRole    = null;
   currentUser = null;
+  /* remove sessão salva */
+  try { localStorage.removeItem("credvision_session"); } catch(e) {}
   /* mostra todos os itens do menu para próximo login */
   document.querySelectorAll(".nav-item").forEach(function(el){ el.style.display = ""; });
   /* limpa campos de login */
@@ -735,6 +772,37 @@ function doLogout() {
   document.getElementById("login-err").textContent = "";
   showLoginPanel();
   document.getElementById("login-screen").style.display = "flex";
+}
+/* ── Restaura sessão salva (auto-login no refresh) ── */
+function tryAutoLogin() {
+  try {
+    var raw = localStorage.getItem("credvision_session");
+    if (!raw) return false;
+    var sess = JSON.parse(raw);
+    if (!sess || !sess.user) return false;
+    /* verifica que o usuário ainda existe */
+    var found = users.find(function(x){ return x.login === sess.user; });
+    if (!found) { localStorage.removeItem("credvision_session"); return false; }
+    currentUser = sess.user;
+    userRole    = sess.role || found.role;
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("sidebar-username").textContent = currentUser;
+    document.getElementById("sidebar-userrole").textContent = userRole === "admin" ? "Administrador" : "Usuário";
+    var cadPanel = document.getElementById("cad-panel");
+    var cadGrid  = document.querySelector("#tab-cadastro > div");
+    if (userRole === "admin") {
+      document.querySelectorAll(".nav-item").forEach(function(el){ el.style.display = ""; });
+      if (cadPanel) cadPanel.style.display = "";
+      if (cadGrid)  cadGrid.style.gridTemplateColumns = "";
+      showTab("dashboard");
+    } else {
+      document.querySelectorAll(".nav-item").forEach(function(el, i){ el.style.display = (i===2)?"":"none"; });
+      if (cadPanel) cadPanel.style.display = "none";
+      if (cadGrid)  cadGrid.style.gridTemplateColumns = "1fr";
+      showTab("cadastro");
+    }
+    return true;
+  } catch(e) { return false; }
 }
 /* Enter nos campos de login e cadastro */
 document.addEventListener("DOMContentLoaded", function() {
@@ -885,7 +953,22 @@ var STATE_KEY = "credvision_state";
 /* ════════════════════════════════════════
    COLE AQUI A URL DO SEU APPS SCRIPT
 ════════════════════════════════════════ */
-var APPS_SCRIPT_URL = "";   // ex: "https://script.google.com/macros/s/AKfy.../exec"
+/* URL do Apps Script — carregada do localStorage para não precisar editar o código */
+var APPS_SCRIPT_URL = (function(){ try { return localStorage.getItem("credvision_gas_url") || ""; } catch(e){ return ""; } })();
+
+/* ── Salva/lê URL pelo painel de configurações ── */
+function saveGasUrl() {
+  var url = (document.getElementById("gas-url-input").value || "").trim();
+  APPS_SCRIPT_URL = url;
+  try { localStorage.setItem("credvision_gas_url", url); } catch(e) {}
+  toast(url ? "✅ URL do Google Sheets salva!" : "🗑 URL removida.");
+}
+function testGasConnection() {
+  if (!APPS_SCRIPT_URL) { toast("⚠️ Configure a URL do Apps Script primeiro."); return; }
+  toast("🔄 Enviando dados de teste para o Sheets...");
+  syncToSheets();
+  setTimeout(function(){ toast("✅ Dados enviados! Verifique sua planilha."); }, 2000);
+}
 
 /* ── Envia dados ao Google Sheets via form+iframe (evita erro de CORS) ── */
 function syncToSheets() {
@@ -918,13 +1001,13 @@ function syncToSheets() {
 /* ── Persistência via localStorage + sync Sheets ── */
 function persist() {
   try {
-    localStorage.setItem(STATE_KEY, JSON.stringify({
-      loans:   loans,
-      clients: clients,
-      users:   users
-    }));
-    syncToSheets();
-  } catch(e) {}
+    var data = JSON.stringify({ loans: loans, clients: clients, users: users });
+    localStorage.setItem(STATE_KEY, data);
+  } catch(e) {
+    console.error("Erro ao salvar localStorage:", e);
+    return;
+  }
+  syncToSheets();
 }
 function loadState() {
   try {
@@ -1503,17 +1586,17 @@ function renderDashboard() {
     var score = calcScore(loan.debtor);
     var stLabel = st === "ok" ? "Quitado" : st === "overdue" ? "Em atraso" : "Em dia";
     return "<tr>" +
-      "<td><strong style='cursor:pointer;color:#1B3A6B;' onclick='openDetail(\""+loan.id+"\")'>" + loan.debtor + "</strong>" +
+      "<td><strong style='cursor:pointer;color:#fff;' onclick='openDetail(\""+loan.id+"\")'>" + loan.debtor + "</strong>" +
         (loan.phone ? "<br><span style='font-size:11px;color:#aaa;'>"+loan.phone+"</span>" : "") + "</td>" +
       "<td>" + brl(loan.totalAmount) + "</td>" +
       "<td style='color:#3B7A57;'>" + brl(paid) + "</td>" +
       "<td style='color:#B85C38;font-weight:600;'>" + brl(Math.max(0,saldo)) + "</td>" +
-      "<td>" + (nd ? "<span style='color:"+(isOverdue(nd.dueDate)?"#B85C38":"#1a1a1a")+"'>" + fmtDate(nd.dueDate) + "</span><br><span style='font-size:11px;color:#888;'>" + brl(nd.amount) + "</span>" : "<span style='color:#3B7A57'>Quitado</span>") + "</td>" +
+      "<td>" + (nd ? "<span style='color:"+(isOverdue(nd.dueDate)?"#E05A3A":"#fff")+"'>" + fmtDate(nd.dueDate) + "</span><br><span style='font-size:11px;color:#888;'>" + brl(nd.amount) + "</span>" : "<span style='color:#4CAF7D'>Quitado</span>") + "</td>" +
       "<td><span class='badge "+st+"'>" + stLabel + "</span></td>" +
       "<td style='text-align:center;'>" +
         (loan.signature
-          ? "<span title='Contrato assinado' style='color:#3B7A57;font-size:16px;'>✅</span>"
-          : "<span title='Sem assinatura' style='color:#B85C38;font-size:13px;cursor:pointer;' onclick='sendSignatureWhatsApp(\""+loan.id+"\")'>⚠️ Enviar</span>") +
+          ? "<span style='color:#4CAF7D;font-size:11px;font-weight:700;'>✅ Assinatura<br>Confirmada</span>"
+          : "<span title='Sem assinatura' style='color:#E05A3A;font-size:12px;cursor:pointer;font-weight:600;' onclick='sendSignatureWhatsApp(\""+loan.id+"\")'>⚠️ Enviar<br>p/ assinar</span>") +
       "</td>" +
       "<td><span class='score "+score+"'>" + score + "</span></td>" +
       "<td style='white-space:nowrap;'>" +
@@ -1893,10 +1976,33 @@ function showTab(name) {
   document.querySelectorAll(".page").forEach(function(p){ p.classList.remove("active"); });
   document.querySelectorAll(".nav-item").forEach(function(t){ t.classList.remove("active"); });
   document.getElementById("tab-"+name).classList.add("active");
-  var idx = {"dashboard":0,"novo":1,"cadastro":2,"clientes":3};
-  document.querySelectorAll(".nav-item")[idx[name]].classList.add("active");
-  /* initSignaturePad removido — assinatura agora é via WhatsApp */
+  var idx = {"dashboard":0,"novo":1,"cadastro":2,"clientes":3,"config":4};
+  if (idx[name] !== undefined) document.querySelectorAll(".nav-item")[idx[name]].classList.add("active");
+  if (name === "config") {
+    /* preenche o campo com a URL salva */
+    var inp = document.getElementById("gas-url-input");
+    if (inp) {
+      inp.value = APPS_SCRIPT_URL || "";
+      inp.style.borderColor = APPS_SCRIPT_URL ? "var(--gold)" : "var(--border)";
+      document.getElementById("gas-url-status").textContent =
+        APPS_SCRIPT_URL ? "✅ URL configurada e ativa." : "⚠️ Nenhuma URL configurada — dados não são enviados ao Sheets.";
+      document.getElementById("gas-url-status").style.color = APPS_SCRIPT_URL ? "#4CAF7D" : "#E2956A";
+    }
+  }
   renderAll();
+}
+function exportBackup() {
+  try {
+    var data = JSON.stringify({ loans: loans, clients: clients, users: users }, null, 2);
+    var blob = new Blob([data], { type: "application/json" });
+    var url  = URL.createObjectURL(blob);
+    var a    = document.createElement("a");
+    a.href     = url;
+    a.download = "credvision_backup_" + today() + ".json";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("✅ Backup exportado!");
+  } catch(e) { toast("Erro ao exportar: " + e.message); }
 }
 function renderAll() {
   updateInstallmentStatuses();
@@ -1913,10 +2019,6 @@ var today_date = today();
 document.getElementById("f-data").value  = today_date;
 document.getElementById("f-vcto").value  = addMonths(today_date, 1);
 window.addEventListener("load", function() {
-  try {
-    var docId = document.location.pathname.split("/")[2];
-    if (docId) Grid.configure({ docId: docId });
-  } catch(e) {}
   // Copiar logo da sidebar para todos os painéis
   var sidebarLogo = document.querySelector(".sidebar-logo-img");
   if (sidebarLogo) {
@@ -1930,7 +2032,10 @@ window.addEventListener("load", function() {
   var isSigMode = checkSignatureMode();
   loadState();
   if (!isSigMode) {
-    document.getElementById("login-screen").style.display = "flex";
+    /* tenta auto-login com sessão salva; se não tiver, mostra tela de login */
+    if (!tryAutoLogin()) {
+      document.getElementById("login-screen").style.display = "flex";
+    }
   }
 });
 </script>
