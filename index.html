@@ -987,10 +987,26 @@ function syncToSheets() {
     form.action  = APPS_SCRIPT_URL;
     form.target  = "_gas_iframe";
     form.style.display = "none";
+    /* Remove base64 de fotos do payload (evita estouro de tamanho no GAS).
+       Envia apenas Sim/Não por slot para indicar se a foto foi anexada. */
+    var clientsSafe = clients.map(function(c) {
+      var fotoStatus = {};
+      if (c.fotos) {
+        Object.keys(c.fotos).forEach(function(k) {
+          fotoStatus[k] = c.fotos[k] ? "Sim" : "Não";
+        });
+      }
+      return {
+        id: c.id, nome: c.nome, cpf: c.cpf, rg: c.rg,
+        tel: c.tel, email: c.email, social: c.social,
+        endereco: c.endereco, indicou: c.indicou,
+        createdAt: c.createdAt, fotos: fotoStatus
+      };
+    });
     var inp = document.createElement("input");
     inp.type  = "hidden";
     inp.name  = "payload";
-    inp.value = JSON.stringify({ loans: loans, clients: clients });
+    inp.value = JSON.stringify({ loans: loans, clients: clientsSafe });
     form.appendChild(inp);
     document.body.appendChild(form);
     form.submit();
@@ -1788,11 +1804,57 @@ function saveClient() {
   };
   clients.push(client);
   persist();
+  uploadPhotosToGAS(client);
   toast("✅ Cliente " + nome + " cadastrado!");
   clearClientForm();
   renderCadastro();
   renderClients();
   updateClientDatalist();
+}
+/* ── Envia cada foto ao GAS para salvar no Drive ── */
+var FOTO_SLOT_LABELS = {
+  "foto-cnh":      "CNH_RG",
+  "foto-rg-seg":   "Segurando_RG",
+  "foto-casa":     "Frente_Casa",
+  "foto-holerite": "Holerite",
+  "foto-comp-res": "Comp_Residencia"
+};
+function uploadPhotosToGAS(client) {
+  if (!APPS_SCRIPT_URL || !client.fotos) return;
+  var slots = Object.keys(client.fotos).filter(function(k){ return !!client.fotos[k]; });
+  if (!slots.length) return;
+  toast("📤 Enviando " + slots.length + " foto" + (slots.length > 1 ? "s" : "") + " para o Drive...");
+  slots.forEach(function(slotId, i) {
+    setTimeout(function() {
+      var raw    = client.fotos[slotId] || "";
+      var b64    = raw.replace(/^data:image\/\w+;base64,/, "");
+      var label  = FOTO_SLOT_LABELS[slotId] || slotId;
+      var fname  = (client.nome || "cliente").replace(/\s+/g,"_") + "_" + label + ".jpg";
+      var iframe = document.getElementById("_gas_iframe");
+      if (!iframe) {
+        iframe = document.createElement("iframe");
+        iframe.id = iframe.name = "_gas_iframe";
+        iframe.style.display = "none";
+        document.body.appendChild(iframe);
+      }
+      var form = document.createElement("form");
+      form.method = "POST"; form.action = APPS_SCRIPT_URL;
+      form.target = "_gas_iframe"; form.style.display = "none";
+      [["action","uploadPhoto"],["clientId",client.id],["clientNome",client.nome],
+       ["slotId",slotId],["filename",fname],["base64",b64]
+      ].forEach(function(p){
+        var inp = document.createElement("input");
+        inp.type="hidden"; inp.name=p[0]; inp.value=p[1];
+        form.appendChild(inp);
+      });
+      document.body.appendChild(form);
+      form.submit();
+      setTimeout(function(){ try{ document.body.removeChild(form); }catch(e){} }, 4000);
+      if (i === slots.length - 1) {
+        setTimeout(function(){ toast("✅ Fotos enviadas para o Drive!"); }, 3000);
+      }
+    }, i * 2500); /* 2,5s entre cada foto para não sobrecarregar */
+  });
 }
 function clearClientForm() {
   ["c-nome","c-cpf","c-rg","c-tel","c-email","c-social","c-end","c-indicou"]
