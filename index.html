@@ -947,19 +947,23 @@ var LS_KEY = "credvision_state";
 var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWAbO-kN_8MNHx0IMINP0qNdeg4LQS04xw4GbUqWwgnK1FZ0lpxgDkFmokdUHZkt8p/exec";
 
 var _syncTimer = null;
+
+/* ── persist: salva local + agenda backup no Sheets ── */
 function persist() {
   var payload = {
-    loans:   JSON.stringify(loans),
-    clients: JSON.stringify(clients),
-    users:   JSON.stringify(users)
+    loans:      JSON.stringify(loans),
+    clients:    JSON.stringify(clients),
+    users:      JSON.stringify(users),
+    _updatedAt: Date.now()          /* timestamp para comparar versões */
   };
   try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
   if (APPS_SCRIPT_URL) {
     if (_syncTimer) clearTimeout(_syncTimer);
-    _syncTimer = setTimeout(function() { backupToSheets(); }, 2000);
+    _syncTimer = setTimeout(function() { backupToSheets(payload); }, 4000);
   }
 }
 
+/* ── loadState: local primeiro, Sheets só se for mais recente ── */
 function loadState() {
   function applyState(s) {
     if (s && s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
@@ -967,38 +971,89 @@ function loadState() {
     if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
     if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
   }
-  /* 1) Carrega localStorage imediatamente para resposta instantânea */
+
+  /* 1) Carrega localStorage imediatamente */
+  var localState = null;
   try {
     var raw = localStorage.getItem(LS_KEY);
-    applyState(raw ? JSON.parse(raw) : null);
-  } catch(e) { applyState(null); }
+    localState = raw ? JSON.parse(raw) : null;
+  } catch(e) {}
+  applyState(localState);
 
-  /* 2) Busca do Google Sheets em background e atualiza se tiver dados */
+  /* 2) Busca Sheets em background — NUNCA sobrescreve se local for mais recente */
   if (APPS_SCRIPT_URL && !sigModeLoanId) {
     fetch(APPS_SCRIPT_URL)
       .then(function(r){ return r.json(); })
       .then(function(r){
         var s = r && r.state ? r.state : null;
         if (!s || (!s.loans && !s.clients)) return;
-        try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
-        applyState(s);
-        toast("☁️ Dados sincronizados do Google Sheets");
+
+        var localTs  = localState ? (localState._updatedAt || 0) : 0;
+        var sheetsTs = s._updatedAt || 0;
+
+        /* Só aplica Sheets se for estritamente mais recente que o local */
+        if (sheetsTs > localTs) {
+          try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
+          applyState(s);
+          toast("☁️ Dados atualizados do Google Sheets");
+        }
+        /* Se local for mais recente, sobe local para o Sheets corrigir */
+        else if (localTs > sheetsTs && localState) {
+          backupToSheets(localState);
+        }
       })
-      .catch(function(err){ console.warn("Sheets sync:", err); });
+      .catch(function(err){ console.warn("Sheets load:", err); });
   }
 }
 
-function backupToSheets() {
+/* ── backupToSheets: usa fetch POST com confirmação ── */
+function backupToSheets(payload) {
+  if (!APPS_SCRIPT_URL) return;
+  if (!payload) {
+    payload = {
+      loans:      JSON.stringify(loans),
+      clients:    JSON.stringify(clients),
+      users:      JSON.stringify(users),
+      _updatedAt: Date.now()
+    };
+  }
+  /* Tenta fetch POST primeiro (mais confiável) */
+  fetch(APPS_SCRIPT_URL, {
+    method:  "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body:    "data=" + encodeURIComponent(JSON.stringify(payload))
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(r){
+    if (r && r.ok) {
+      /* Atualiza timestamp no local para marcar que Sheets está em dia */
+      try {
+        var local = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+        local._updatedAt = payload._updatedAt;
+        localStorage.setItem(LS_KEY, JSON.stringify(local));
+      } catch(e) {}
+      toast("✅ Salvo no Google Sheets");
+    } else {
+      /* Fallback: form POST silencioso */
+      _formPostBackup(payload);
+    }
+  })
+  .catch(function(){
+    /* Fallback: form POST silencioso */
+    _formPostBackup(payload);
+  });
+}
+
+function _formPostBackup(payload) {
   var form  = document.getElementById("cv-sync-form");
   var input = document.getElementById("cv-sync-data");
   if (!form || !input) return;
-  var payload = { loans: JSON.stringify(loans), clients: JSON.stringify(clients), users: JSON.stringify(users) };
   form.action = APPS_SCRIPT_URL;
   input.value = JSON.stringify(payload);
   form.submit();
-  toast("☁️ Backup enviado para Google Sheets!");
 }
 
+/* ── restoreFromSheets: botão manual — força sobrescrição ── */
 function restoreFromSheets() {
   toast("Buscando dados do Google Sheets…");
   fetch(APPS_SCRIPT_URL)
