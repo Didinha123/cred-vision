@@ -1349,6 +1349,31 @@ function confirmPay(loanId, installId, fullAmount, minAmount) {
   renderAll();
 }
 /* ════════════════════════════════════════
+   QUITAR TODAS AS PARCELAS
+════════════════════════════════════════ */
+function payAllInstallments(loanId) {
+  var loan = loans.find(function(l){ return l.id === loanId; });
+  if (!loan) return;
+  var pendentes = (loan.installments||[]).filter(function(p){ return p.status !== "paid"; });
+  if (!pendentes.length) { toast("Todas as parcelas já estão quitadas!"); return; }
+  var total = pendentes.reduce(function(s,p){ return s + (p.amount||0); }, 0);
+  if (!confirm(
+    "Quitar " + pendentes.length + " parcela" + (pendentes.length>1?"s":"") +
+    " de " + loan.debtor + " pelo valor total de " + brl(total) + "?\n\nEsta ação não pode ser desfeita."
+  )) return;
+  var hoje = today();
+  pendentes.forEach(function(p) {
+    p.status     = "paid";
+    p.paidAmount = p.amount;
+    p.paidDate   = hoje;
+  });
+  persist();
+  closeModal();
+  renderAll();
+  toast("✅ " + pendentes.length + " parcela" + (pendentes.length>1?"s":"") + " de " + loan.debtor + " quitadas!");
+}
+
+/* ════════════════════════════════════════
    DELETAR EMPRÉSTIMO
 ════════════════════════════════════════ */
 function deleteLoan(loanId) {
@@ -1392,6 +1417,9 @@ function openDetail(loanId) {
       "<td><span class='badge "+cls+"'>"+label+"</span></td>" +
       "<td>" + payBtn + wppBtn + "</td></tr>";
   }).join("");
+  var pendentes    = (loan.installments||[]).filter(function(p){ return p.status !== "paid"; }).length;
+  var saldoRestante = (loan.installments||[]).filter(function(p){ return p.status !== "paid"; })
+    .reduce(function(s,p){ return s + (p.amount||0); }, 0);
   document.getElementById("modal-title").textContent = "📋 " + loan.debtor;
   document.getElementById("modal-body").innerHTML =
     "<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;'>" +
@@ -1415,8 +1443,13 @@ function openDetail(loanId) {
     "<table style='width:100%;font-size:13px;border-collapse:collapse;'>" +
     "<thead><tr style='background:#f8f9fa;'><th style='padding:8px 10px;text-align:left;'>Parc.</th><th style='padding:8px 10px;text-align:left;'>Vcto</th><th style='padding:8px 10px;text-align:left;'>Valor</th><th style='padding:8px 10px;text-align:left;'>Pago em</th><th style='padding:8px 10px;text-align:left;'>Pago</th><th style='padding:8px 10px;text-align:left;'>Status</th><th style='padding:8px 10px;'>Ações</th></tr></thead>" +
     "<tbody>" + rows + "</tbody></table>" +
-    "<div style='margin-top:16px;display:flex;gap:10px;'>" +
+    "<div style='margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;'>" +
     "<button class='btn btn-wpp' onclick='sendWhatsApp(\""+loan.id+"\",null)'>📱 Cobrar próxima parcela</button>" +
+    (pendentes > 0
+      ? "<button class='btn btn-green' onclick='payAllInstallments(\""+loan.id+"\")'>" +
+        "💳 Quitar tudo (" + pendentes + " parcela" + (pendentes>1?"s":"") + " · " + brl(saldoRestante) + ")" +
+        "</button>"
+      : "") +
     "</div>";
   document.getElementById("modal-overlay").classList.add("open");
 }
