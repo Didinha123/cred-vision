@@ -334,7 +334,7 @@ var STATE_KEY = "cobranca_data";
 /* ── Persistência via localStorage ── */
 var LS_KEY = "credvision_state";
 // URL do Google Apps Script (para backup/restore manual)
-var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzHn2qQT4LpG2GWPa-q8pq8JfJVsTJ6PNbn_Tpr8DGwRxifD5BYsBSIq9DUTtSESJY/exec";
+var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby4FmCiBJjIMDlhkAq83M0w735DIENjybhcHnGCMOm5RlDKDQdXdDhhXOD8OOm0FPw1/exec";
 
 var _syncTimer = null;
 function persist() {
