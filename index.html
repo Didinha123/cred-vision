@@ -333,7 +333,7 @@ tr:hover td{background:rgba(201,164,72,.04);}
     <div id="sig-mode-info" style="background:var(--bg3);border-radius:12px;padding:16px;margin-bottom:20px;font-size:13px;border:1px solid var(--border-gold);">
       <p style="color:var(--text-muted);">Carregando dados do empréstimo...</p>
     </div>
-    <div id="sig-mode-form" style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:16px;border:1px solid var(--border);">
+    <div id="sig-mode-form" style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:16px;border:1px solid var(--border);display:none;">
       <div style="font-size:12px;color:var(--gold);font-weight:700;margin-bottom:10px;">📋 Seus dados de cadastro</div>
       <div style="display:grid;gap:8px;">
         <input id="sig-cpf" type="text" inputmode="numeric" placeholder="CPF (ex: 000.000.000-00)" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;">
@@ -839,17 +839,17 @@ function fillSigModeInfo() {
   if (cpfEl) { cpfEl.value = cpf; if (cpf) cpfEl.setAttribute("readonly","readonly"); }
   if (telEl) { telEl.value = phone; if (phone) telEl.setAttribute("readonly","readonly"); }
   if (endEl) { endEl.value = end; if (end) endEl.setAttribute("readonly","readonly"); }
-  /* Se nome e telefone já estão disponíveis, recolhe o formulário */
+  /* Mostra resumo compacto — cliente não precisa preencher nada */
   var formEl = document.getElementById("sig-mode-form");
   if (formEl) {
-    if (loan.debtor && phone) {
-      /* Mostra só um resumo compacto dos dados, sem campos editáveis */
-      formEl.innerHTML =
-        "<div style='font-size:12px;color:var(--gold);font-weight:700;margin-bottom:6px;'>📋 Dados identificados</div>" +
-        "<div style='font-size:13px;color:var(--text);'><strong>" + loan.debtor + "</strong>" +
-        (phone ? " · " + phone : "") +
-        (cpf   ? " · CPF: " + cpf : "") + "</div>";
-    }
+    var info = "<div style='font-size:12px;color:var(--gold);font-weight:700;margin-bottom:6px;'>📋 Dados do contrato</div>" +
+      "<div style='font-size:13px;color:var(--text);line-height:1.8;'>" +
+      "<strong>" + loan.debtor + "</strong>";
+    if (phone) info += "<br><span style='color:var(--text-muted);font-size:12px;'>📱 " + phone + "</span>";
+    if (cpf)   info += "<br><span style='color:var(--text-muted);font-size:12px;'>🪪 " + cpf + "</span>";
+    if (end)   info += "<br><span style='color:var(--text-muted);font-size:12px;'>📍 " + end + "</span>";
+    info += "</div>";
+    formEl.innerHTML = info;
     formEl.style.display = "block";
   }
 }
