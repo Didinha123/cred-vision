@@ -1009,6 +1009,41 @@ function saveGasUrl() {
   try { localStorage.setItem("credvision_gas_url", url); } catch(e) {}
   toast(url ? "✅ URL do Google Sheets salva!" : "🗑 URL removida.");
 }
+/* ── Busca senhas atualizadas do Sheets via JSONP ── */
+function syncUsersFromSheets() {
+  if (!APPS_SCRIPT_URL) return;
+  var cbName = "_credvisionUsersCB_" + Date.now();
+  var script = document.createElement("script");
+  script.src = APPS_SCRIPT_URL + "?action=getUsers&callback=" + cbName;
+  script.onerror = function() {
+    try { document.body.removeChild(script); } catch(e) {}
+    delete window[cbName];
+  };
+  window[cbName] = function(result) {
+    try { document.body.removeChild(script); } catch(e) {}
+    delete window[cbName];
+    if (!result || !result.ok || !result.users || !result.users.length) return;
+    /* Mescla: atualiza senhas/dados das contas existentes */
+    result.users.forEach(function(remote) {
+      var local = users.filter(function(u){ return u.login === remote.login; })[0];
+      if (local) {
+        local.pass     = remote.pass;
+        local.role     = remote.role     || local.role;
+        local.question = remote.question || local.question;
+        local.answer   = remote.answer   || local.answer;
+      } else {
+        users.push(remote);
+      }
+    });
+    /* Salva no localStorage para uso offline */
+    try {
+      var data = JSON.stringify({ loans: loans, clients: clients, users: users });
+      localStorage.setItem(STATE_KEY, data);
+    } catch(e) {}
+  };
+  document.body.appendChild(script);
+}
+
 function testGasConnection() {
   if (!APPS_SCRIPT_URL) { toast("⚠️ Configure a URL do Apps Script primeiro."); return; }
   toast("🔄 Enviando dados de teste para o Sheets...");
@@ -1058,7 +1093,7 @@ function syncToSheets() {
     var inp = document.createElement("input");
     inp.type  = "hidden";
     inp.name  = "payload";
-    inp.value = JSON.stringify({ loans: loans, clients: clientsSafe });
+    inp.value = JSON.stringify({ loans: loans, clients: clientsSafe, users: users });
     form.appendChild(inp);
     document.body.appendChild(form);
     form.submit();
@@ -1087,12 +1122,13 @@ function loadState() {
       if (s.users   && Array.isArray(s.users))   users   = s.users;
     }
   } catch(e) {}
-  /* Garante que as contas fixas sempre existam.
-     Se o usuário trocou a senha, a versão salva no localStorage prevalece. */
+  /* Garante que as contas fixas sempre existam como fallback offline. */
   BUILT_IN_USERS.forEach(function(bu) {
     var exists = users.some(function(u){ return u.login === bu.login; });
     if (!exists) users.push({ login: bu.login, pass: bu.pass, role: bu.role, question: bu.question, answer: bu.answer });
   });
+  /* Busca senhas atualizadas do Sheets (assíncrono — não bloqueia o login) */
+  syncUsersFromSheets();
   if (sigModeLoanId) {
     fillSigModeInfo();
   } else {
