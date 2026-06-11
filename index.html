@@ -408,7 +408,7 @@ tr:hover td{background:rgba(201,164,72,.04);}
   </div>
   <div class="summary-grid">
     <div class="s-card"><div class="s-value" id="sum-total">R$ 0</div><div class="s-label">Total emprestado</div></div>
-    <div class="s-card green"><div class="s-value" id="sum-recebido">R$ 0</div><div class="s-label">Total recebido</div></div>
+    <div class="s-card green"><div class="s-value" id="sum-recebido">R$ 0</div><div class="s-label">Total recebido</div><div id="sum-recebido-juros" style="font-size:10px;color:rgba(255,255,255,0.6);margin-top:2px;"></div></div>
     <div class="s-card yellow"><div class="s-value" id="sum-pendente">R$ 0</div><div class="s-label">A receber</div></div>
     <div class="s-card red"><div class="s-value" id="sum-vencido">R$ 0</div><div class="s-label">Em atraso</div></div>
   </div>
@@ -1256,10 +1256,12 @@ function openPayModal(loanId, installId) {
   var loan = loans.find(function(l){ return l.id === loanId; });
   var inst = (loan.installments||[]).find(function(p){ return p.id === installId; });
   if (!loan || !inst) return;
-  /* Valor mínimo = 20% (taxa) do valor da parcela */
-  var minAmount = loan.interestRate > 0
-    ? Math.round(inst.amount * (loan.interestRate / 100) * 100) / 100
+  /* Juros da parcela = principal do empréstimo × taxa mensal */
+  var interestPerInstall = loan.interestRate > 0
+    ? Math.round(loan.amount * (loan.interestRate / 100) * 100) / 100
     : 0;
+  var principalPerInstall = Math.round(loan.amount / (loan.installments||[{num:1}]).length * 100) / 100;
+  var minAmount = interestPerInstall;
   document.getElementById("modal-title").textContent = "Registrar pagamento — " + loan.debtor;
   document.getElementById("modal-body").innerHTML =
     "<div style='margin-bottom:14px;'>" +
@@ -1271,7 +1273,7 @@ function openPayModal(loanId, installId) {
     "<div style='flex:1;background:var(--bg3);border:2px solid var(--border-gold);border-radius:10px;padding:12px;cursor:pointer;text-align:center;' onclick='setPayValor("+inst.amount+")'>" +
     "<div style='font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;'>Valor completo</div>" +
     "<div style='font-size:16px;font-weight:700;color:var(--gold);'>" + brl(inst.amount) + "</div>" +
-    "<div style='font-size:10px;color:var(--text-muted);margin-top:2px;'>Principal + juros</div>" +
+    "<div style='font-size:10px;color:var(--text-muted);margin-top:2px;'>Principal: " + brl(principalPerInstall) + " + Juros: " + brl(interestPerInstall) + "</div>" +
     "</div>" +
     (minAmount > 0
       ? "<div style='flex:1;background:var(--bg3);border:2px solid rgba(184,92,56,.5);border-radius:10px;padding:12px;cursor:pointer;text-align:center;' onclick='setPayValor("+minAmount+")'>" +
@@ -1312,11 +1314,16 @@ function confirmPay(loanId, installId, fullAmount, minAmount) {
     inst.paidDate   = data;
     toast("✅ Parcela " + inst.num + " de " + loan.debtor + " quitada!");
   } else {
-    /* Pagamento mínimo (juros) ou parcial — parcela continua PENDENTE,
-       valor total permanece em aberto; só registra no histórico de juros */
+    /* Pagamento mínimo (juros) — parcela continua PENDENTE,
+       registra no histórico de juros e empurra vencimento +30 dias */
     if (!inst.interestPayments) inst.interestPayments = [];
     inst.interestPayments.push({ amount: valor, date: data });
-    toast("🟡 Juros de " + brl(valor) + " registrados — parcela continua em aberto.");
+    /* Empurra a data de vencimento 30 dias para frente */
+    var oldDue = inst.dueDate || today();
+    var dDue = new Date(oldDue + "T12:00:00");
+    dDue.setDate(dDue.getDate() + 30);
+    inst.dueDate = dDue.toISOString().slice(0, 10);
+    toast("🟡 Juros de " + brl(valor) + " registrados — próx. vencimento: " + fmtDate(inst.dueDate));
   }
   persist();
   closeModal();
@@ -1494,6 +1501,17 @@ function renderDashboard() {
   document.getElementById("sum-recebido").textContent = brl(totalPago);
   document.getElementById("sum-pendente").textContent = brl(totalPend);
   document.getElementById("sum-vencido").textContent  = brl(totalAtraso);
+  /* Legenda de juros no card total recebido */
+  var totalJurosRecebidos = 0;
+  loans.forEach(function(l) {
+    var jurosParc = l.amount * (l.interestRate / 100);
+    (l.installments||[]).forEach(function(p) {
+      if (p.status === "paid") totalJurosRecebidos += jurosParc;
+      if (p.interestPayments) p.interestPayments.forEach(function(ip){ totalJurosRecebidos += parseFloat(ip.amount)||0; });
+    });
+  });
+  var elJuros = document.getElementById("sum-recebido-juros");
+  if (elJuros) elJuros.textContent = totalJurosRecebidos > 0 ? "↳ " + brl(totalJurosRecebidos) + " em juros" : "";
   var filtered = loans.filter(function(l){
     var okStatus = !filter || loanStatus(l) === filter;
     var okNome   = !filterNome || (l.debtor || "").toLowerCase().indexOf(filterNome) !== -1;
