@@ -967,10 +967,25 @@ function loadState() {
     if (s && s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
     if (sigModeLoanId) { fillSigModeInfo(); } else { renderAll(); }
   }
+  /* 1) Carrega localStorage imediatamente para resposta instantânea */
   try {
     var raw = localStorage.getItem(LS_KEY);
     applyState(raw ? JSON.parse(raw) : null);
   } catch(e) { applyState(null); }
+
+  /* 2) Busca do Google Sheets em background e atualiza se tiver dados */
+  if (APPS_SCRIPT_URL && !sigModeLoanId) {
+    fetch(APPS_SCRIPT_URL)
+      .then(function(r){ return r.json(); })
+      .then(function(r){
+        var s = r && r.state ? r.state : null;
+        if (!s || (!s.loans && !s.clients)) return;
+        try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
+        applyState(s);
+        toast("☁️ Dados sincronizados do Google Sheets");
+      })
+      .catch(function(err){ console.warn("Sheets sync:", err); });
+  }
 }
 
 function backupToSheets() {
@@ -1995,10 +2010,9 @@ function renderAll() {
    INIT
 ════════════════════════════════════════ */
 (function() {
-  /* Verifica se é modo assinatura via link */
-  if (!checkSignatureMode()) {
-    loadState();
-  }
+  /* Verifica se é modo assinatura via link (sempre chama loadState depois) */
+  checkSignatureMode();
+  loadState();
   /* Polling a cada 30s para detectar assinatura remota */
   setInterval(function() {
     if (!sigModeLoanId || document.hidden) return;
