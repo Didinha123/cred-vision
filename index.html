@@ -1012,6 +1012,33 @@ function saveGasUrl() {
   try { localStorage.setItem("credvision_gas_url", url); } catch(e) {}
   toast(url ? "✅ URL do Google Sheets salva!" : "🗑 URL removida.");
 }
+/* ── Carrega empréstimos + clientes do Sheets (novo dispositivo) ── */
+function syncDataFromSheets(onDone) {
+  if (!APPS_SCRIPT_URL) { if (onDone) onDone(); return; }
+  var cbName = "_credvisionDataCB_" + Date.now();
+  var script = document.createElement("script");
+  script.src = APPS_SCRIPT_URL + "?action=getData&callback=" + cbName;
+  script.onerror = function() {
+    try { document.body.removeChild(script); } catch(e) {}
+    delete window[cbName];
+    if (onDone) onDone();
+  };
+  window[cbName] = function(result) {
+    try { document.body.removeChild(script); } catch(e) {}
+    delete window[cbName];
+    if (result && result.ok) {
+      if (result.loans   && result.loans.length)   loans   = result.loans;
+      if (result.clients && result.clients.length) clients = result.clients;
+      try {
+        localStorage.setItem(STATE_KEY, JSON.stringify({ loans: loans, clients: clients, users: users }));
+      } catch(e) {}
+      renderAll();
+    }
+    if (onDone) onDone();
+  };
+  document.body.appendChild(script);
+}
+
 /* ── Busca senhas atualizadas do Sheets via JSONP ── */
 function syncUsersFromSheets() {
   if (!APPS_SCRIPT_URL) return;
@@ -1132,6 +1159,10 @@ function loadState() {
   });
   /* Busca senhas atualizadas do Sheets (assíncrono — não bloqueia o login) */
   syncUsersFromSheets();
+  /* Novo dispositivo: se não há empréstimos no localStorage, busca do Sheets */
+  if (loans.length === 0) {
+    syncDataFromSheets();
+  }
   if (sigModeLoanId) {
     fillSigModeInfo();
   } else {
