@@ -828,17 +828,30 @@ function fillSigModeInfo() {
     "<div><span style='color:var(--text-muted);'>Parcelas:</span> <strong>" + (loan.installments||[]).length + "x " + brl((loan.installments||[{amount:0}])[0].amount) + "</strong></div>" +
     "<div><span style='color:var(--text-muted);'>1º Vcto:</span> <strong>" + fmtDate((loan.installments||[{dueDate:""}])[0].dueDate) + "</strong></div>" +
     "</div>";
-  /* Preenche automaticamente os campos do formulário de cadastro */
+  /* Preenche automaticamente os campos com dados disponíveis no link */
   var client = clients.find(function(c){ return c.nome.toLowerCase() === loan.debtor.toLowerCase(); });
-  var cpfEl   = document.getElementById("sig-cpf");
-  var telEl   = document.getElementById("sig-phone");
-  var endEl   = document.getElementById("sig-address");
-  if (cpfEl) cpfEl.value = (client && client.cpf)      ? client.cpf      : "";
-  if (telEl) telEl.value = (client && client.tel)      ? client.tel      : (loan.phone || "");
-  if (endEl) endEl.value = (client && client.endereco) ? client.endereco : "";
-  /* Oculta o formulário se telefone já veio do empréstimo (campos não essenciais) */
+  var cpfEl = document.getElementById("sig-cpf");
+  var telEl = document.getElementById("sig-phone");
+  var endEl = document.getElementById("sig-address");
+  var phone = (client && client.tel) ? client.tel : (loan.phone || "");
+  var cpf   = (client && client.cpf) ? client.cpf : "";
+  var end   = (client && client.endereco) ? client.endereco : "";
+  if (cpfEl) { cpfEl.value = cpf; if (cpf) cpfEl.setAttribute("readonly","readonly"); }
+  if (telEl) { telEl.value = phone; if (phone) telEl.setAttribute("readonly","readonly"); }
+  if (endEl) { endEl.value = end; if (end) endEl.setAttribute("readonly","readonly"); }
+  /* Se nome e telefone já estão disponíveis, recolhe o formulário */
   var formEl = document.getElementById("sig-mode-form");
-  if (formEl) formEl.style.display = "block";
+  if (formEl) {
+    if (loan.debtor && phone) {
+      /* Mostra só um resumo compacto dos dados, sem campos editáveis */
+      formEl.innerHTML =
+        "<div style='font-size:12px;color:var(--gold);font-weight:700;margin-bottom:6px;'>📋 Dados identificados</div>" +
+        "<div style='font-size:13px;color:var(--text);'><strong>" + loan.debtor + "</strong>" +
+        (phone ? " · " + phone : "") +
+        (cpf   ? " · CPF: " + cpf : "") + "</div>";
+    }
+    formEl.style.display = "block";
+  }
 }
 function initSigModeCanvas() {
   var canvas = document.getElementById("sig-mode-canvas");
@@ -1214,10 +1227,10 @@ function sendSignatureWhatsApp(loanId) {
     id: loan.id,
     debtor: loan.debtor,
     phone: loan.phone,
-    principal: loan.principal,
+    amount: loan.amount,
     totalAmount: loan.totalAmount,
+    interestRate: loan.interestRate,
     installments: loan.installments,
-    rate: loan.rate,
     createdAt: loan.createdAt
   };
   var encoded = btoa(unescape(encodeURIComponent(JSON.stringify(loanSnap))));
