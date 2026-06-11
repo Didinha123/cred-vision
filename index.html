@@ -586,6 +586,18 @@ tr:hover td{background:rgba(201,164,72,.04);}
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Exporte todos os dados como arquivo JSON para backup.</p>
       <button onclick="exportBackup()" class="btn" style="background:var(--bg4);border:1px solid var(--border);">📥 Exportar backup</button>
     </div>
+
+    <!-- Importar do Google Forms -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;">
+      <h3 style="color:var(--gold);font-size:14px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">📋 Importar do Google Forms</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Busca respostas novas do formulário de cadastro e importa como clientes. Duplicatas por CPF são ignoradas.</p>
+      <p style="font-size:11px;color:var(--text-muted);margin-bottom:16px;" id="forms-last-import-label">Última importação: nunca</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button onclick="importFromForms(false)" class="btn btn-green" style="white-space:nowrap;">📥 Importar do Forms</button>
+        <button onclick="importFromForms(true)" class="btn" style="background:var(--bg4);border:1px solid var(--border);white-space:nowrap;" title="Reimporta todas as respostas ignorando a data da última importação">🔄 Reimportar tudo</button>
+      </div>
+      <div id="forms-import-status" style="margin-top:12px;font-size:12px;color:var(--text-muted);"></div>
+    </div>
   </div>
 </div>
 <!-- ════════════════ MODAL DETALHES ════════════════ -->
@@ -987,10 +999,32 @@ function syncToSheets() {
     form.action  = APPS_SCRIPT_URL;
     form.target  = "_gas_iframe";
     form.style.display = "none";
+    /* Remove base64 de fotos do payload (evita estouro de tamanho no GAS).
+       Se for URL do Drive, mantém a URL. Caso contrário envia Sim/Não. */
+    var clientsSafe = clients.map(function(c) {
+      var fotoStatus = {};
+      if (c.fotos) {
+        Object.keys(c.fotos).forEach(function(k) {
+          var v = c.fotos[k];
+          if (!v) { fotoStatus[k] = "Não"; }
+          else if (v.indexOf("http://") === 0 || v.indexOf("https://") === 0) {
+            fotoStatus[k] = v; // URL do Drive — envia direto
+          } else {
+            fotoStatus[k] = "Sim"; // base64 — envia apenas confirmação
+          }
+        });
+      }
+      return {
+        id: c.id, nome: c.nome, cpf: c.cpf, rg: c.rg,
+        tel: c.tel, email: c.email, social: c.social,
+        endereco: c.endereco, indicou: c.indicou,
+        createdAt: c.createdAt, fotos: fotoStatus
+      };
+    });
     var inp = document.createElement("input");
     inp.type  = "hidden";
     inp.name  = "payload";
-    inp.value = JSON.stringify({ loans: loans, clients: clients });
+    inp.value = JSON.stringify({ loans: loans, clients: clientsSafe });
     form.appendChild(inp);
     document.body.appendChild(form);
     form.submit();
@@ -1788,11 +1822,57 @@ function saveClient() {
   };
   clients.push(client);
   persist();
+  uploadPhotosToGAS(client);
   toast("✅ Cliente " + nome + " cadastrado!");
   clearClientForm();
   renderCadastro();
   renderClients();
   updateClientDatalist();
+}
+/* ── Envia cada foto ao GAS para salvar no Drive ── */
+var FOTO_SLOT_LABELS = {
+  "foto-cnh":      "CNH_RG",
+  "foto-rg-seg":   "Segurando_RG",
+  "foto-casa":     "Frente_Casa",
+  "foto-holerite": "Holerite",
+  "foto-comp-res": "Comp_Residencia"
+};
+function uploadPhotosToGAS(client) {
+  if (!APPS_SCRIPT_URL || !client.fotos) return;
+  var slots = Object.keys(client.fotos).filter(function(k){ return !!client.fotos[k]; });
+  if (!slots.length) return;
+  toast("📤 Enviando " + slots.length + " foto" + (slots.length > 1 ? "s" : "") + " para o Drive...");
+  slots.forEach(function(slotId, i) {
+    setTimeout(function() {
+      var raw    = client.fotos[slotId] || "";
+      var b64    = raw.replace(/^data:image\/\w+;base64,/, "");
+      var label  = FOTO_SLOT_LABELS[slotId] || slotId;
+      var fname  = (client.nome || "cliente").replace(/\s+/g,"_") + "_" + label + ".jpg";
+      var iframe = document.getElementById("_gas_iframe");
+      if (!iframe) {
+        iframe = document.createElement("iframe");
+        iframe.id = iframe.name = "_gas_iframe";
+        iframe.style.display = "none";
+        document.body.appendChild(iframe);
+      }
+      var form = document.createElement("form");
+      form.method = "POST"; form.action = APPS_SCRIPT_URL;
+      form.target = "_gas_iframe"; form.style.display = "none";
+      [["action","uploadPhoto"],["clientId",client.id],["clientNome",client.nome],
+       ["slotId",slotId],["filename",fname],["base64",b64]
+      ].forEach(function(p){
+        var inp = document.createElement("input");
+        inp.type="hidden"; inp.name=p[0]; inp.value=p[1];
+        form.appendChild(inp);
+      });
+      document.body.appendChild(form);
+      form.submit();
+      setTimeout(function(){ try{ document.body.removeChild(form); }catch(e){} }, 4000);
+      if (i === slots.length - 1) {
+        setTimeout(function(){ toast("✅ Fotos enviadas para o Drive!"); }, 3000);
+      }
+    }, i * 2500); /* 2,5s entre cada foto para não sobrecarregar */
+  });
 }
 function clearClientForm() {
   ["c-nome","c-cpf","c-rg","c-tel","c-email","c-social","c-end","c-indicou"]
@@ -1810,11 +1890,22 @@ function viewClient(id) {
   var c = clients.find(function(x){ return x.id === id; });
   if (!c) return;
   var fotos = FOTO_SLOTS.map(function(s){
-    var b64 = c.fotos && c.fotos[s.id];
-    return "<div style='text-align:center;'>" +
-      (b64
-        ? "<img src='"+b64+"' style='width:100%;height:110px;object-fit:cover;border-radius:8px;border:1px solid var(--border-gold);cursor:pointer;' onclick='window.open(\""+b64+"\")'>"
-        : "<div style='height:110px;background:var(--bg3);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:28px;border:1px dashed var(--border);'>" + s.icon + "</div>") +
+    var val = c.fotos && c.fotos[s.id];
+    var isUrl = val && (val.indexOf("http://") === 0 || val.indexOf("https://") === 0);
+    var isB64 = val && !isUrl;
+    var preview;
+    if (isUrl) {
+      // Foto vinda do Forms — URL do Drive: mostra ícone clicável
+      preview = "<a href='" + val + "' target='_blank' style='display:block;height:110px;background:var(--bg3);border-radius:8px;border:1px solid var(--border-gold);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;text-decoration:none;'>" +
+        "<span style='font-size:28px;'>"+s.icon+"</span>" +
+        "<span style='font-size:10px;color:var(--gold);font-weight:700;'>Ver no Drive</span>" +
+        "</a>";
+    } else if (isB64) {
+      preview = "<img src='" + val + "' style='width:100%;height:110px;object-fit:cover;border-radius:8px;border:1px solid var(--border-gold);cursor:pointer;' onclick='window.open(\"" + val + "\")'>";
+    } else {
+      preview = "<div style='height:110px;background:var(--bg3);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:28px;border:1px dashed var(--border);'>" + s.icon + "</div>";
+    }
+    return "<div style='text-align:center;'>" + preview +
       "<div style='font-size:10px;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.3px;'>"+s.label+"</div></div>";
   }).join("");
   document.getElementById("modal-title").textContent = "🪪 " + c.nome;
@@ -1988,6 +2079,7 @@ function showTab(name) {
         APPS_SCRIPT_URL ? "✅ URL configurada e ativa." : "⚠️ Nenhuma URL configurada — dados não são enviados ao Sheets.";
       document.getElementById("gas-url-status").style.color = APPS_SCRIPT_URL ? "#4CAF7D" : "#E2956A";
     }
+    updateFormsImportLabel();
   }
   renderAll();
 }
@@ -2004,6 +2096,123 @@ function exportBackup() {
     toast("✅ Backup exportado!");
   } catch(e) { toast("Erro ao exportar: " + e.message); }
 }
+
+/* ── Importar cadastros do Google Forms via JSONP ── */
+var FORMS_IMPORT_KEY = "credvision_last_forms_import";
+
+function updateFormsImportLabel() {
+  var el = document.getElementById("forms-last-import-label");
+  if (!el) return;
+  try {
+    var ts = localStorage.getItem(FORMS_IMPORT_KEY);
+    el.textContent = ts
+      ? "Última importação: " + new Date(ts).toLocaleString("pt-BR")
+      : "Última importação: nunca";
+  } catch(e) {}
+}
+
+function importFromForms(reimportAll) {
+  if (!APPS_SCRIPT_URL) {
+    toast("⚠️ Configure a URL do Google Sheets antes de importar.");
+    var el = document.getElementById("forms-import-status");
+    if (el) el.textContent = "Configure a URL do Apps Script na seção acima primeiro.";
+    return;
+  }
+
+  var statusEl = document.getElementById("forms-import-status");
+  if (statusEl) statusEl.textContent = "⏳ Buscando respostas do formulário...";
+  toast("⏳ Buscando respostas do Forms...");
+
+  // Determina filtro de data (se não for reimportar tudo)
+  var since = "";
+  if (!reimportAll) {
+    try {
+      since = localStorage.getItem(FORMS_IMPORT_KEY) || "";
+    } catch(e) {}
+  }
+
+  // JSONP: injeta <script> com callback global temporário
+  var cbName = "_credvisionFormsCB_" + Date.now();
+  var script  = document.createElement("script");
+  var params  = "action=getFormResponses&callback=" + cbName;
+  if (since) params += "&since=" + encodeURIComponent(since);
+  script.src = APPS_SCRIPT_URL + "?" + params;
+  script.onerror = function() {
+    document.body.removeChild(script);
+    delete window[cbName];
+    if (statusEl) statusEl.textContent = "❌ Erro ao conectar com o Apps Script.";
+    toast("❌ Falha ao buscar dados do Forms.");
+  };
+
+  window[cbName] = function(result) {
+    // Limpa script e callback
+    try { document.body.removeChild(script); } catch(e) {}
+    delete window[cbName];
+
+    if (!result || !result.ok) {
+      var msg = (result && result.error) ? result.error : "resposta inválida";
+      if (statusEl) statusEl.textContent = "❌ Erro: " + msg;
+      toast("❌ Erro ao importar: " + msg);
+      return;
+    }
+
+    var rows    = result.rows || [];
+    var added   = 0;
+    var skipped = 0;
+
+    rows.forEach(function(r) {
+      if (!r.nome && !r.cpf) return;
+      // Deduplicação por CPF (ignora se já existe cliente com mesmo CPF)
+      var cpfClean = (r.cpf || "").replace(/\D/g, "");
+      var exists = clients.some(function(c) {
+        return cpfClean && c.cpf && c.cpf.replace(/\D/g, "") === cpfClean;
+      });
+      if (exists) { skipped++; return; }
+
+      // Cria novo cliente com dados do Forms
+      var newClient = {
+        id:        "c" + Date.now() + Math.random().toString(36).slice(2, 7),
+        nome:      r.nome      || "",
+        cpf:       r.cpf       || "",
+        rg:        r.rg        || "",
+        tel:       r.tel       || "",
+        email:     r.email     || "",
+        social:    r.social    || "",
+        endereco:  r.endereco  || "",
+        indicou:   r.indicou   || "",
+        createdAt: r.timestamp ? r.timestamp.slice(0, 10) : today(),
+        fotos:     {}
+      };
+
+      // Fotos: URLs do Drive (não base64) — guarda como string de URL
+      var fotoSlots = ["foto-cnh","foto-rg-seg","foto-casa","foto-holerite","foto-comp-res"];
+      fotoSlots.forEach(function(slot) {
+        if (r.fotos && r.fotos[slot]) {
+          newClient.fotos[slot] = r.fotos[slot]; // URL do Drive
+        }
+      });
+
+      clients.push(newClient);
+      added++;
+    });
+
+    // Salva data da importação
+    try { localStorage.setItem(FORMS_IMPORT_KEY, new Date().toISOString()); } catch(e) {}
+
+    persist();
+    updateFormsImportLabel();
+    renderClients();
+
+    var msg = "✅ " + added + " cliente(s) importado(s)";
+    if (skipped > 0) msg += ", " + skipped + " duplicata(s) ignorada(s)";
+    msg += ".";
+    if (statusEl) statusEl.textContent = msg;
+    toast(msg);
+  };
+
+  document.body.appendChild(script);
+}
+
 function renderAll() {
   updateInstallmentStatuses();
   renderDashboard();
@@ -2021,7 +2230,7 @@ document.getElementById("f-vcto").value  = addMonths(today_date, 1);
 window.addEventListener("load", function() {
   // Copiar logo da sidebar para todos os painéis
   var sidebarLogo = document.querySelector(".sidebar-logo-img");
-  if (sidebarLogo) {ac
+  if (sidebarLogo) {
     ["login-logo","register-logo","recover-logo","sig-mode-logo"].forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.src = sidebarLogo.src;
