@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1007,6 +1008,72 @@ function loadState() {
 }
 
 /* ── backupToSheets: usa fetch POST com confirmação ── */
+function backupToSheets(payload) {
+  if (!APPS_SCRIPT_URL) return;
+  if (!payload) {
+    payload = {
+      loans:      JSON.stringify(loans),
+      clients:    JSON.stringify(clients),
+      users:      JSON.stringify(users),
+      _updatedAt: Date.now()
+    };
+  }
+  /* Tenta fetch POST primeiro (mais confiável) */
+  fetch(APPS_SCRIPT_URL, {
+    method:  "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body:    "data=" + encodeURIComponent(JSON.stringify(payload))
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(r){
+    if (r && r.ok) {
+      /* Atualiza timestamp no local para marcar que Sheets está em dia */
+      try {
+        var local = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+        local._updatedAt = payload._updatedAt;
+        localStorage.setItem(LS_KEY, JSON.stringify(local));
+      } catch(e) {}
+      toast("✅ Salvo no Google Sheets");
+    } else {
+      /* Fallback: form POST silencioso */
+      _formPostBackup(payload);
+    }
+  })
+  .catch(function(){
+    /* Fallback: form POST silencioso */
+    _formPostBackup(payload);
+  });
+}
+
+function _formPostBackup(payload) {
+  var form  = document.getElementById("cv-sync-form");
+  var input = document.getElementById("cv-sync-data");
+  if (!form || !input) return;
+  form.action = APPS_SCRIPT_URL;
+  input.value = JSON.stringify(payload);
+  form.submit();
+}
+
+/* ── restoreFromSheets: botão manual — força sobrescrição ── */
+function restoreFromSheets() {
+  toast("Buscando dados do Google Sheets…");
+  fetch(APPS_SCRIPT_URL)
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      var s = r && r.state ? r.state : null;
+      if (!s || (!s.loans && !s.clients)) { toast("⚠️ Planilha vazia."); return; }
+      try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
+      if (s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
+      if (s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
+      if (s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
+      renderAll();
+      toast("✅ Dados restaurados do Google Sheets!");
+    })
+    .catch(function(){ toast("⚠️ Erro ao buscar backup."); });
+}
+/* ════════════════════════════════════════
+   UTILITÁRIOS
+════════════════════════════════════════ */
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 function brl(n) {
   return "R$ " + parseFloat(n||0).toLocaleString("pt-BR", {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -1349,31 +1416,6 @@ function confirmPay(loanId, installId, fullAmount, minAmount) {
   renderAll();
 }
 /* ════════════════════════════════════════
-   QUITAR TODAS AS PARCELAS
-════════════════════════════════════════ */
-function payAllInstallments(loanId) {
-  var loan = loans.find(function(l){ return l.id === loanId; });
-  if (!loan) return;
-  var pendentes = (loan.installments||[]).filter(function(p){ return p.status !== "paid"; });
-  if (!pendentes.length) { toast("Todas as parcelas já estão quitadas!"); return; }
-  var total = pendentes.reduce(function(s,p){ return s + (p.amount||0); }, 0);
-  if (!confirm(
-    "Quitar " + pendentes.length + " parcela" + (pendentes.length>1?"s":"") +
-    " de " + loan.debtor + " pelo valor total de " + brl(total) + "?\n\nEsta ação não pode ser desfeita."
-  )) return;
-  var hoje = today();
-  pendentes.forEach(function(p) {
-    p.status     = "paid";
-    p.paidAmount = p.amount;
-    p.paidDate   = hoje;
-  });
-  persist();
-  closeModal();
-  renderAll();
-  toast("✅ " + pendentes.length + " parcela" + (pendentes.length>1?"s":"") + " de " + loan.debtor + " quitadas!");
-}
-
-/* ════════════════════════════════════════
    DELETAR EMPRÉSTIMO
 ════════════════════════════════════════ */
 function deleteLoan(loanId) {
@@ -1417,9 +1459,6 @@ function openDetail(loanId) {
       "<td><span class='badge "+cls+"'>"+label+"</span></td>" +
       "<td>" + payBtn + wppBtn + "</td></tr>";
   }).join("");
-  var pendentes    = (loan.installments||[]).filter(function(p){ return p.status !== "paid"; }).length;
-  var saldoRestante = (loan.installments||[]).filter(function(p){ return p.status !== "paid"; })
-    .reduce(function(s,p){ return s + (p.amount||0); }, 0);
   document.getElementById("modal-title").textContent = "📋 " + loan.debtor;
   document.getElementById("modal-body").innerHTML =
     "<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;'>" +
@@ -1443,13 +1482,8 @@ function openDetail(loanId) {
     "<table style='width:100%;font-size:13px;border-collapse:collapse;'>" +
     "<thead><tr style='background:#f8f9fa;'><th style='padding:8px 10px;text-align:left;'>Parc.</th><th style='padding:8px 10px;text-align:left;'>Vcto</th><th style='padding:8px 10px;text-align:left;'>Valor</th><th style='padding:8px 10px;text-align:left;'>Pago em</th><th style='padding:8px 10px;text-align:left;'>Pago</th><th style='padding:8px 10px;text-align:left;'>Status</th><th style='padding:8px 10px;'>Ações</th></tr></thead>" +
     "<tbody>" + rows + "</tbody></table>" +
-    "<div style='margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;'>" +
+    "<div style='margin-top:16px;display:flex;gap:10px;'>" +
     "<button class='btn btn-wpp' onclick='sendWhatsApp(\""+loan.id+"\",null)'>📱 Cobrar próxima parcela</button>" +
-    (pendentes > 0
-      ? "<button class='btn btn-green' onclick='payAllInstallments(\""+loan.id+"\")'>" +
-        "💳 Quitar tudo (" + pendentes + " parcela" + (pendentes>1?"s":"") + " · " + brl(saldoRestante) + ")" +
-        "</button>"
-      : "") +
     "</div>";
   document.getElementById("modal-overlay").classList.add("open");
 }
@@ -2000,9 +2034,27 @@ function showTab(name) {
   if (name === "novo") initNovoForm();
   renderAll();
 }
-
+function initNovoForm() {
+  var dataEl = document.getElementById("f-data");
+  var vctoEl = document.getElementById("f-vcto");
+  if (dataEl && !dataEl.value) {
+    dataEl.value = today();
+  }
+  if (vctoEl && !vctoEl.value) {
+    autoSetVcto();
+  }
+}
+function autoSetVcto() {
+  var dataEl = document.getElementById("f-data");
+  var vctoEl = document.getElementById("f-vcto");
+  if (!dataEl || !vctoEl) return;
+  var base = dataEl.value || today();
+  var d = new Date(base + "T12:00:00");
+  d.setDate(d.getDate() + 30);
+  vctoEl.value = d.toISOString().slice(0, 10);
+  previewInstallments();
+}
 function renderAll() {
-  if (!currentUser) return; /* não renderiza se não estiver logado */
   updateInstallmentStatuses();
   renderDashboard();
   renderCadastro();
@@ -2010,157 +2062,48 @@ function renderAll() {
   updateClientDatalist();
   autoNotify();
 }
-
-/* ════════════════════════════════════════
-   SYNC GOOGLE SHEETS — form+iframe (confiável com GAS)
-════════════════════════════════════════ */
-
-function backupToSheets(payload) {
-  if (!APPS_SCRIPT_URL) return;
-  if (!payload) {
-    payload = {
-      loans:      JSON.stringify(loans),
-      clients:    JSON.stringify(clients),
-      users:      JSON.stringify(users),
-      _updatedAt: Date.now()
-    };
-  }
-  var form   = document.getElementById("cv-sync-form");
-  var input  = document.getElementById("cv-sync-data");
-  var iframe = document.getElementById("cv-sync-frame");
-  if (!form || !input || !iframe) return;
-
-  /* onload do iframe = confirmação que a requisição chegou */
-  iframe.onload = function() {
-    iframe.onload = null;
-    try {
-      var txt = iframe.contentDocument ? iframe.contentDocument.body.innerText : "";
-      var r = txt ? JSON.parse(txt) : null;
-      if (r && r.ok) {
-        try {
-          var local = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
-          local._updatedAt = payload._updatedAt;
-          localStorage.setItem(LS_KEY, JSON.stringify(local));
-        } catch(e) {}
-        toast("✅ Salvo no Google Sheets");
-      }
-    } catch(e) {
-      /* cross-origin após redirect — normal no GAS, dados foram enviados */
-    }
-  };
-
-  form.action = APPS_SCRIPT_URL;
-  input.value = JSON.stringify(payload);
-  form.submit();
-}
-
-function restoreFromSheets() {
-  toast("Buscando dados do Google Sheets…");
-  fetch(APPS_SCRIPT_URL)
-    .then(function(r){ return r.json(); })
-    .then(function(r){
-      var s = r && r.state ? r.state : null;
-      if (!s || (!s.loans && !s.clients)) { toast("⚠️ Planilha vazia."); return; }
-      try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
-      if (s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
-      if (s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
-      if (s.users)   { try { users   = JSON.parse(s.users);   } catch(e){} }
-      renderAll();
-      toast("✅ Dados restaurados do Google Sheets!");
-    })
-    .catch(function(){ toast("⚠️ Erro ao buscar backup."); });
-}
-
-/* ════════════════════════════════════════
-   POLLING EM TEMPO REAL — assinaturas
-════════════════════════════════════════ */
-var _knownSigs = {}; /* loanId → true se já tinha assinatura */
-
-function initSigSnapshot() {
-  loans.forEach(function(l){ if (l.signature) _knownSigs[l.id] = true; });
-}
-
-function pollSignatures() {
-  if (!APPS_SCRIPT_URL || sigModeLoanId || !currentUser) return;
-  fetch(APPS_SCRIPT_URL)
-    .then(function(r){ return r.json(); })
-    .then(function(r){
-      var s = r && r.state ? r.state : null;
-      if (!s || !s.loans) return;
-
-      var remoteLoans = [];
-      try { remoteLoans = JSON.parse(s.loans); } catch(e){ return; }
-
-      var localTs  = 0;
-      try {
-        var lc = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
-        localTs = lc._updatedAt || 0;
-      } catch(e) {}
-      var sheetsTs = s._updatedAt || 0;
-
-      var newSig = false;
-      remoteLoans.forEach(function(rl) {
-        if (rl.signature && !_knownSigs[rl.id]) {
-          /* nova assinatura detectada */
-          _knownSigs[rl.id] = true;
-          newSig = true;
-          var local = loans.find(function(l){ return l.id === rl.id; });
-          if (local) {
-            local.signature  = rl.signature;
-            local.signedAt   = rl.signedAt || new Date().toISOString().slice(0,10);
-          }
-        }
-      });
-
-      if (newSig) {
-        persist();
-        renderAll();
-        toast("🖊️ Nova assinatura recebida! Dashboard atualizado.");
-      } else if (sheetsTs > localTs) {
-        /* outros dados mais recentes no Sheets — atualiza silencioso */
-        try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {}
-        if (s.loans)   { try { loans   = JSON.parse(s.loans);   } catch(e){} }
-        if (s.clients) { try { clients = JSON.parse(s.clients); } catch(e){} }
-        renderAll();
-      }
-    })
-    .catch(function(){});
-}
-
 /* ════════════════════════════════════════
    INIT
 ════════════════════════════════════════ */
 (function() {
-  /* 1. Telas de login recebem Enter */
-  var lPass = document.getElementById("l-pass");
-  var lUser = document.getElementById("l-user");
-  if (lPass) lPass.addEventListener("keydown", function(e){ if(e.key==="Enter") doLogin(); });
-  if (lUser) lUser.addEventListener("keydown", function(e){ if(e.key==="Enter") doLogin(); });
-  var rPass2 = document.getElementById("r-pass2");
-  if (rPass2) rPass2.addEventListener("keydown", function(e){ if(e.key==="Enter") doRegister(); });
-
-  /* 2. Modo assinatura (link externo do cliente) */
+  /* Verifica se é modo assinatura via link (sempre chama loadState depois) */
   checkSignatureMode();
-
-  /* 3. Carrega dados (local + Sheets em background) */
   loadState();
-
-  /* 4. Polling a cada 8s para detectar assinaturas em tempo real */
-  initSigSnapshot();
-  setInterval(pollSignatures, 8000);
-
-  /* 5. Recarrega ao voltar para a aba */
+  /* Polling a cada 30s para detectar assinatura remota */
+  setInterval(function() {
+    if (!sigModeLoanId || document.hidden) return;
+    var raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    try {
+      var s = JSON.parse(raw);
+      if (s && s.loans) {
+        var arr = JSON.parse(s.loans);
+        var found = arr.find(function(l){ return l.id === sigModeLoanId; });
+        if (found && found.signature) {
+          document.getElementById("sig-mode-canvas").style.display = "none";
+          var btn = document.querySelector("#sig-mode .btn-primary");
+          if (btn) btn.style.display = "none";
+          var btnG = document.querySelector("#sig-mode .btn-ghost");
+          if (btnG) btnG.style.display = "none";
+          var st = document.getElementById("sig-mode-status");
+          if (st) st.style.display = "none";
+          var sf = document.getElementById("sig-mode-form");
+          if (sf) sf.style.display = "none";
+          document.getElementById("sig-mode-done").style.display = "block";
+        }
+      }
+    } catch(e){}
+  }, 30000);
   document.addEventListener("visibilitychange", function() {
-    if (!document.hidden && !sigModeLoanId) pollSignatures();
+    if (!document.hidden && !sigModeLoanId) renderAll();
   });
 })();
 </script>
 
-<!-- Iframe oculto + form para POST ao Google Apps Script -->
-<iframe id="cv-sync-frame" name="cv-sync-frame" style="display:none;"></iframe>
-<form id="cv-sync-form" method="POST" target="cv-sync-frame" style="display:none;">
+<!-- Formulário oculto para sync com Google Sheets (sem CORS) -->
+<iframe name="cv-sync-frame" style="display:none"></iframe>
+<form id="cv-sync-form" method="POST" target="cv-sync-frame" style="display:none">
   <input type="hidden" name="data" id="cv-sync-data">
 </form>
-
 </body>
 </html>
