@@ -593,8 +593,27 @@ tr:hover td{background:rgba(201,164,72,.04);}
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Busca respostas novas do formulário de cadastro e importa como clientes. Duplicatas por CPF são ignoradas.</p>
       <p style="font-size:11px;color:var(--text-muted);margin-bottom:16px;" id="forms-last-import-label">Última importação: nunca</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <button onclick="importFromForms(false)" class="btn btn-green" style="white-space:nowrap;">📥 Importar do Forms</button>
+        <button onclick="importFromForms(false)" class="btn btn-green" style="white-space:nowrap;">📥 Importar agora</button>
         <button onclick="importFromForms(true)" class="btn" style="background:var(--bg4);border:1px solid var(--border);white-space:nowrap;" title="Reimporta todas as respostas ignorando a data da última importação">🔄 Reimportar tudo</button>
+      </div>
+      <!-- Auto-import -->
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;">
+          <input type="checkbox" id="auto-import-toggle" onchange="saveAutoImportSettings()"
+            style="width:16px;height:16px;accent-color:var(--gold);cursor:pointer;">
+          <span>Importação automática em segundo plano</span>
+        </label>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:10px;font-size:13px;">
+          <span style="color:var(--text-muted);">Verificar a cada:</span>
+          <select id="auto-import-interval" onchange="saveAutoImportSettings()"
+            style="padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;">
+            <option value="15">15 minutos</option>
+            <option value="30" selected>30 minutos</option>
+            <option value="60">1 hora</option>
+            <option value="120">2 horas</option>
+          </select>
+        </div>
+        <div id="auto-import-status-label" style="margin-top:8px;font-size:11px;color:var(--text-muted);"></div>
       </div>
       <div id="forms-import-status" style="margin-top:12px;font-size:12px;color:var(--text-muted);"></div>
     </div>
@@ -624,6 +643,16 @@ tr:hover td{background:rgba(201,164,72,.04);}
 var userRole    = null; /* null | "admin" | "user" */
 var currentUser = null; /* username string */
 var users = [];
+
+/* ── Contas fixas — sempre disponíveis em qualquer dispositivo ──
+   Se você precisar trocar a senha, use a opção "Redefinir senha" na
+   tela de login. A nova senha fica salva e vale em todos os aparelhos
+   que sincronizarem com o mesmo Google Sheets.
+   Para alterar a senha padrão permanentemente, edite aqui.            */
+var BUILT_IN_USERS = [
+  { login: "Jadson admin", pass: "Jadson admin", role: "admin", question: "app", answer: "credvision" },
+  { login: "Diego admin",  pass: "diegoadmin",   role: "admin", question: "app", answer: "credvision" }
+];
 /* ── Painel helpers ── */
 function showRegisterPanel() {
   document.getElementById("login-panel").style.display    = "none";
@@ -742,6 +771,11 @@ function doLogin() {
     if (cadGrid)  cadGrid.style.gridTemplateColumns = "1fr";
     showTab("cadastro");
   }
+  // Importa do Forms ao fazer login (2s de delay para app terminar de carregar)
+  if (APPS_SCRIPT_URL) {
+    setTimeout(function(){ importFromForms(false, true); }, 2000);
+  }
+  startAutoImport();
 }
 function doRegister() {
   var u   = document.getElementById("r-user").value.trim();
@@ -1053,6 +1087,12 @@ function loadState() {
       if (s.users   && Array.isArray(s.users))   users   = s.users;
     }
   } catch(e) {}
+  /* Garante que as contas fixas sempre existam.
+     Se o usuário trocou a senha, a versão salva no localStorage prevalece. */
+  BUILT_IN_USERS.forEach(function(bu) {
+    var exists = users.some(function(u){ return u.login === bu.login; });
+    if (!exists) users.push({ login: bu.login, pass: bu.pass, role: bu.role, question: bu.question, answer: bu.answer });
+  });
   if (sigModeLoanId) {
     fillSigModeInfo();
   } else {
@@ -2080,6 +2120,8 @@ function showTab(name) {
       document.getElementById("gas-url-status").style.color = APPS_SCRIPT_URL ? "#4CAF7D" : "#E2956A";
     }
     updateFormsImportLabel();
+    loadAutoImportSettings();
+    updateAutoImportStatusLabel();
   }
   renderAll();
 }
@@ -2111,17 +2153,21 @@ function updateFormsImportLabel() {
   } catch(e) {}
 }
 
-function importFromForms(reimportAll) {
+function importFromForms(reimportAll, silent) {
   if (!APPS_SCRIPT_URL) {
-    toast("⚠️ Configure a URL do Google Sheets antes de importar.");
-    var el = document.getElementById("forms-import-status");
-    if (el) el.textContent = "Configure a URL do Apps Script na seção acima primeiro.";
+    if (!silent) {
+      toast("⚠️ Configure a URL do Google Sheets antes de importar.");
+      var el = document.getElementById("forms-import-status");
+      if (el) el.textContent = "Configure a URL do Apps Script na seção acima primeiro.";
+    }
     return;
   }
 
   var statusEl = document.getElementById("forms-import-status");
-  if (statusEl) statusEl.textContent = "⏳ Buscando respostas do formulário...";
-  toast("⏳ Buscando respostas do Forms...");
+  if (!silent) {
+    if (statusEl) statusEl.textContent = "⏳ Buscando respostas do formulário...";
+    toast("⏳ Buscando respostas do Forms...");
+  }
 
   // Determina filtro de data (se não for reimportar tudo)
   var since = "";
@@ -2138,21 +2184,24 @@ function importFromForms(reimportAll) {
   if (since) params += "&since=" + encodeURIComponent(since);
   script.src = APPS_SCRIPT_URL + "?" + params;
   script.onerror = function() {
-    document.body.removeChild(script);
+    try { document.body.removeChild(script); } catch(e) {}
     delete window[cbName];
-    if (statusEl) statusEl.textContent = "❌ Erro ao conectar com o Apps Script.";
-    toast("❌ Falha ao buscar dados do Forms.");
+    if (!silent) {
+      if (statusEl) statusEl.textContent = "❌ Erro ao conectar com o Apps Script.";
+      toast("❌ Falha ao buscar dados do Forms.");
+    }
   };
 
   window[cbName] = function(result) {
-    // Limpa script e callback
     try { document.body.removeChild(script); } catch(e) {}
     delete window[cbName];
 
     if (!result || !result.ok) {
       var msg = (result && result.error) ? result.error : "resposta inválida";
-      if (statusEl) statusEl.textContent = "❌ Erro: " + msg;
-      toast("❌ Erro ao importar: " + msg);
+      if (!silent) {
+        if (statusEl) statusEl.textContent = "❌ Erro: " + msg;
+        toast("❌ Erro ao importar: " + msg);
+      }
       return;
     }
 
@@ -2162,14 +2211,12 @@ function importFromForms(reimportAll) {
 
     rows.forEach(function(r) {
       if (!r.nome && !r.cpf) return;
-      // Deduplicação por CPF (ignora se já existe cliente com mesmo CPF)
       var cpfClean = (r.cpf || "").replace(/\D/g, "");
       var exists = clients.some(function(c) {
         return cpfClean && c.cpf && c.cpf.replace(/\D/g, "") === cpfClean;
       });
       if (exists) { skipped++; return; }
 
-      // Cria novo cliente com dados do Forms
       var newClient = {
         id:        "c" + Date.now() + Math.random().toString(36).slice(2, 7),
         nome:      r.nome      || "",
@@ -2184,11 +2231,10 @@ function importFromForms(reimportAll) {
         fotos:     {}
       };
 
-      // Fotos: URLs do Drive (não base64) — guarda como string de URL
       var fotoSlots = ["foto-cnh","foto-rg-seg","foto-casa","foto-holerite","foto-comp-res"];
       fotoSlots.forEach(function(slot) {
         if (r.fotos && r.fotos[slot]) {
-          newClient.fotos[slot] = r.fotos[slot]; // URL do Drive
+          newClient.fotos[slot] = r.fotos[slot];
         }
       });
 
@@ -2199,18 +2245,91 @@ function importFromForms(reimportAll) {
     // Salva data da importação
     try { localStorage.setItem(FORMS_IMPORT_KEY, new Date().toISOString()); } catch(e) {}
 
-    persist();
-    updateFormsImportLabel();
-    renderClients();
+    if (added > 0) {
+      persist();
+      updateFormsImportLabel();
+      renderClients();
+    }
 
     var msg = "✅ " + added + " cliente(s) importado(s)";
     if (skipped > 0) msg += ", " + skipped + " duplicata(s) ignorada(s)";
     msg += ".";
     if (statusEl) statusEl.textContent = msg;
-    toast(msg);
+    // No modo silencioso, só avisa se entrou alguém novo
+    if (!silent || added > 0) toast(msg);
   };
 
   document.body.appendChild(script);
+}
+
+/* ── Auto-import do Forms ── */
+var AUTO_IMPORT_KEY      = "credvision_auto_import";
+var AUTO_IMPORT_INT_KEY  = "credvision_auto_import_interval";
+var _autoImportTimer     = null;
+
+function saveAutoImportSettings() {
+  var enabled  = document.getElementById("auto-import-toggle").checked;
+  var interval = parseInt(document.getElementById("auto-import-interval").value, 10) || 30;
+  try {
+    localStorage.setItem(AUTO_IMPORT_KEY, enabled ? "1" : "0");
+    localStorage.setItem(AUTO_IMPORT_INT_KEY, String(interval));
+  } catch(e) {}
+  startAutoImport(); // reinicia com novas configurações
+  updateAutoImportStatusLabel();
+}
+
+function loadAutoImportSettings() {
+  // Preenche os controles com os valores salvos
+  try {
+    var enabled  = localStorage.getItem(AUTO_IMPORT_KEY) !== "0"; // padrão: ativado
+    var interval = parseInt(localStorage.getItem(AUTO_IMPORT_INT_KEY), 10) || 30;
+    var toggle   = document.getElementById("auto-import-toggle");
+    var sel      = document.getElementById("auto-import-interval");
+    if (toggle) toggle.checked = enabled;
+    if (sel) {
+      // Seleciona opção mais próxima
+      var opts = [15, 30, 60, 120];
+      var best = opts.reduce(function(a, b){ return Math.abs(b-interval) < Math.abs(a-interval) ? b : a; });
+      sel.value = String(best);
+    }
+  } catch(e) {}
+}
+
+function startAutoImport() {
+  // Cancela timer anterior
+  if (_autoImportTimer) { clearInterval(_autoImportTimer); _autoImportTimer = null; }
+  if (!APPS_SCRIPT_URL) return;
+
+  var enabled  = true;
+  var interval = 30;
+  try {
+    enabled  = localStorage.getItem(AUTO_IMPORT_KEY) !== "0";
+    interval = parseInt(localStorage.getItem(AUTO_IMPORT_INT_KEY), 10) || 30;
+  } catch(e) {}
+
+  if (!enabled) return;
+
+  var ms = interval * 60 * 1000;
+  _autoImportTimer = setInterval(function() {
+    importFromForms(false, true); // true = modo silencioso (sem toast se 0 novos)
+  }, ms);
+}
+
+function updateAutoImportStatusLabel() {
+  var el = document.getElementById("auto-import-status-label");
+  if (!el) return;
+  try {
+    var enabled  = localStorage.getItem(AUTO_IMPORT_KEY) !== "0";
+    var interval = parseInt(localStorage.getItem(AUTO_IMPORT_INT_KEY), 10) || 30;
+    if (!APPS_SCRIPT_URL) {
+      el.textContent = "⚠️ Configure a URL do Apps Script para ativar.";
+    } else if (!enabled) {
+      el.textContent = "Auto-import desativado.";
+    } else {
+      el.textContent = "✅ Ativo — verificando a cada " + interval + " min" + (interval === 1 ? "" : "") + ".";
+      el.style.color = "#4CAF7D";
+    }
+  } catch(e) {}
 }
 
 function renderAll() {
@@ -2244,6 +2363,12 @@ window.addEventListener("load", function() {
     /* tenta auto-login com sessão salva; se não tiver, mostra tela de login */
     if (!tryAutoLogin()) {
       document.getElementById("login-screen").style.display = "flex";
+    } else {
+      // Usuário já logado: importa do Forms ao abrir + inicia polling
+      if (APPS_SCRIPT_URL) {
+        setTimeout(function(){ importFromForms(false, true); }, 2000);
+      }
+      startAutoImport();
     }
   }
 });
