@@ -772,9 +772,10 @@ function doLogin() {
     if (cadGrid)  cadGrid.style.gridTemplateColumns = "1fr";
     showTab("cadastro");
   }
-  // Importa do Forms ao fazer login (2s de delay para app terminar de carregar)
+  // Força sync completo ao fazer login para garantir aba "Dados" atualizada
   if (APPS_SCRIPT_URL) {
-    setTimeout(function(){ importFromForms(false, true); }, 2000);
+    setTimeout(function(){ syncToSheets(); }, 1000);
+    setTimeout(function(){ importFromForms(false, true); }, 3000);
   }
   startAutoImport();
 }
@@ -2461,9 +2462,10 @@ window.addEventListener("load", function() {
     if (!tryAutoLogin()) {
       document.getElementById("login-screen").style.display = "flex";
     } else {
-      // Usuário já logado: importa do Forms ao abrir + inicia polling
+      // Usuário já logado: sync completo + importa do Forms + inicia polling
       if (APPS_SCRIPT_URL) {
-        setTimeout(function(){ importFromForms(false, true); }, 2000);
+        setTimeout(function(){ syncToSheets(); }, 1000);
+        setTimeout(function(){ importFromForms(false, true); }, 3000);
       }
       startAutoImport();
     }
