@@ -1014,7 +1014,7 @@ function saveGasUrl() {
   try { localStorage.setItem("credvision_gas_url", url); } catch(e) {}
   toast(url ? "✅ URL do Google Sheets salva!" : "🗑 URL removida.");
 }
-/* ── Carrega empréstimos + clientes do Sheets (novo dispositivo) ── */
+/* ── Carrega empréstimos + clientes do Sheets e mescla com dados locais ── */
 function syncDataFromSheets(onDone) {
   if (!APPS_SCRIPT_URL) { if (onDone) onDone(); return; }
   var cbName = "_credvisionDataCB_" + Date.now();
@@ -1029,8 +1029,31 @@ function syncDataFromSheets(onDone) {
     try { document.body.removeChild(script); } catch(e) {}
     delete window[cbName];
     if (result && result.ok) {
-      if (result.loans   && result.loans.length)   loans   = result.loans;
-      if (result.clients && result.clients.length) clients = result.clients;
+      /* Mescla empréstimos: remote + local, deduplicando por ID.
+         Se o ID existe em ambos, o local (com assinatura real) tem prioridade. */
+      if (result.loans && result.loans.length) {
+        var localById = {};
+        loans.forEach(function(l){ localById[l.id] = l; });
+        result.loans.forEach(function(r){
+          if (!localById[r.id]) { localById[r.id] = r; }
+          /* se local tem signature real (base64), mantém local; caso contrário atualiza */
+          else if (!localById[r.id].signature || localById[r.id].signature === "Sim") {
+            var sig = localById[r.id].signature;
+            localById[r.id] = r;
+            if (sig && sig !== "Sim") localById[r.id].signature = sig;
+          }
+        });
+        loans = Object.keys(localById).map(function(k){ return localById[k]; });
+      }
+      /* Mescla clientes: remote + local, deduplicando por ID */
+      if (result.clients && result.clients.length) {
+        var localCById = {};
+        clients.forEach(function(c){ localCById[c.id] = c; });
+        result.clients.forEach(function(r){
+          if (!localCById[r.id]) localCById[r.id] = r;
+        });
+        clients = Object.keys(localCById).map(function(k){ return localCById[k]; });
+      }
       try {
         localStorage.setItem(STATE_KEY, JSON.stringify({ loans: loans, clients: clients, users: users }));
       } catch(e) {}
@@ -1187,10 +1210,8 @@ function loadState() {
   });
   /* Busca senhas atualizadas do Sheets (assíncrono — não bloqueia o login) */
   syncUsersFromSheets();
-  /* Novo dispositivo: se não há empréstimos no localStorage, busca do Sheets */
-  if (loans.length === 0) {
-    syncDataFromSheets();
-  }
+  /* Sempre sincroniza com o Sheets ao abrir — mescla dados remotos com locais */
+  syncDataFromSheets();
   if (sigModeLoanId) {
     fillSigModeInfo();
   } else {
